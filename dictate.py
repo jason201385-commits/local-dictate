@@ -47,6 +47,14 @@ DEFAULT_CFG = {
     "max_seconds": 600,
     "beep": True,
     "restore_clipboard": False,
+    # 文字怎麼送進目標視窗：
+    #   "paste"（預設）= 剪貼簿 + 模擬 Ctrl+V
+    #   "type"        = 逐字 Unicode 注入。⚠️ 2026-07-26 實測：中文輸入法在「中」
+    #                   模式時，英數字會被輸入法吃掉、全形標點也會掉，
+    #                   送 "測試繁體中文，含標點！easyknow 123" 只收到 "測試繁體中文含標點"。
+    #                   只在 paste 完全沒用的程式上才考慮。
+    # 兩種都會先把文字放進剪貼簿，真的沒進去時你可以自己 Ctrl+V 救回來。
+    "output_method": "paste",
     "hotkeys": {
         "paste": "<ctrl>+<alt>+<space>",
         "send": "<ctrl>+<alt>+<enter>",
@@ -155,6 +163,26 @@ def beep(kind):
 LOG_PATH = HERE / "dictate.log"
 
 
+def log_exc(where, exc_type, exc, tb):
+    """pythonw 沒有 stderr，例外全部是靜默的——尤其 pynput 的監聽器只要在
+    callback 裡爆一次就整個停掉，使用者只會看到「按了沒反應」。全部寫進 log。"""
+    import traceback
+    log(f"💥 {where} 未捕捉例外：{exc_type.__name__}: {exc}")
+    for line in "".join(traceback.format_tb(tb)).rstrip().splitlines()[-8:]:
+        log("    " + line.rstrip())
+
+
+def safe(fn, where):
+    """包住熱鍵 / 面板的 callback，讓一次意外不會讓整個監聽器陣亡。"""
+    def inner(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except Exception as e:
+            import sys as _s
+            log_exc(where, type(e), e, e.__traceback__ or _s.exc_info()[2])
+    return inner
+
+
 def log(msg):
     line = f"[{datetime.datetime.now():%H:%M:%S}] {msg}"
     print(line, flush=True)
@@ -257,14 +285,33 @@ class Recorder:
 
 
 # ── 輸出：貼到游標 ──────────────────────────────────────────────────────
-def _wait_modifiers_released(timeout=2.0):
-    """等實體 Ctrl/Alt/Shift/Win 放開，免得模擬的 Ctrl+V 被夾成 Ctrl+Alt+V。"""
+def _wait_modifiers_released(timeout=5.0):
+    """等實體 Ctrl/Alt/Shift/Win 放開，免得模擬的 Ctrl+V 被夾成 Ctrl+Alt+V。
+    用熱鍵觸發時你的手指還按著修飾鍵，這一步沒等夠就會無聲失敗。"""
     u = ctypes.windll.user32
     t0 = time.time()
     while time.time() - t0 < timeout:
         if not any(u.GetAsyncKeyState(v) & 0x8000 for v in (0x11, 0x12, 0x10, 0x5B, 0x5C)):
-            return
+            return True
         time.sleep(0.02)
+    log("⚠ 修飾鍵一直沒放開（等了 5 秒）→ 貼上可能被夾成 Ctrl+Alt+V")
+    return False
+
+
+def _set_clipboard(text, tries=12):
+    """寫入剪貼簿並**讀回確認**。剪貼簿是共用資源，被其他程式佔用時
+    copy() 可能無聲失敗，接著 Ctrl+V 就貼出舊內容或什麼都沒有。"""
+    last = None
+    for _ in range(tries):
+        try:
+            pyperclip.copy(text)
+            if pyperclip.paste() == text:
+                return True
+        except Exception as e:
+            last = e
+        time.sleep(0.05)
+    log(f"⚠ 剪貼簿寫入無法確認（{str(last)[:50] if last else '內容對不上'}）")
+    return False
 
 
 _kb = keyboard.Controller()
@@ -317,33 +364,69 @@ def _win_desc(hwnd=None):
 
 def _focus_target(hwnd):
     """貼上前把焦點還給「你開始講話時所在的那個視窗」。
-    小面板有 WS_EX_NOACTIVATE 所以通常焦點根本沒跑掉，這是保險。
-    回傳 True 表示焦點確實落在目標上。"""
+
+    ⚠️ 2026-07-26 實測：單純呼叫 SetForegroundWindow 會被 Windows 的「前景鎖」
+    擋掉，而且**靜默失敗**——結果是貼上被送到當下真正的前景視窗去，
+    症狀就是「有時候成功、有時候字不見了」。
+    解法是先 AttachThreadInput 把自己接到前景執行緒的輸入佇列上，
+    這樣 SetForegroundWindow 才會被允許。
+
+    回傳 True 才代表焦點確實在目標上；False 時呼叫端**不應該貼上**。
+    """
     if not hwnd:
         return False
     try:
         u = ctypes.windll.user32
-        if u.GetForegroundWindow() != hwnd:
-            u.SetForegroundWindow(hwnd)
-            time.sleep(0.15)
-        return u.GetForegroundWindow() == hwnd
-    except Exception:
+        if not u.IsWindow(hwnd):
+            return False
+        if u.GetForegroundWindow() == hwnd:
+            return True
+        cur = u.GetForegroundWindow()
+        t_cur = u.GetWindowThreadProcessId(cur, None)
+        t_tgt = u.GetWindowThreadProcessId(hwnd, None)
+        attached = False
+        if t_cur and t_tgt and t_cur != t_tgt:
+            attached = bool(u.AttachThreadInput(t_cur, t_tgt, True))
+        if u.IsIconic(hwnd):
+            u.ShowWindow(hwnd, 9)            # SW_RESTORE
+        u.SetForegroundWindow(hwnd)
+        u.SetFocus(hwnd)
+        if attached:
+            u.AttachThreadInput(t_cur, t_tgt, False)
+        time.sleep(0.18)
+        ok = u.GetForegroundWindow() == hwnd
+        if not ok:
+            log(f"⚠ 搶不回目標視窗焦點（前景是 {_win_desc()}）")
+        return ok
+    except Exception as e:
+        log(f"⚠ 焦點還原失敗：{str(e)[:60]}")
         return False
 
 
 def paste(text):
+    """把文字送進目標視窗。
+
+    2026-07-26 實測：模擬 Ctrl+V 送進一般視窗沒問題（Tk 靶測試通過），
+    但送不進 Claude 桌面版（Electron/MSIX）。所以保留「逐字打字」這條
+    完全不同的路徑——它走 Unicode 注入，不依賴目標程式怎麼處理貼上快捷鍵。
+
+    無論用哪條路，文字都會先放進剪貼簿：真的沒進去時，你自己按 Ctrl+V 就能救回來。
+    """
     prev = None
     if CFG["restore_clipboard"]:
         try:
             prev = pyperclip.paste()
         except Exception:
             prev = None
-    pyperclip.copy(text)
+    _set_clipboard(text)              # 一律先進剪貼簿當保險，並讀回確認
     _wait_modifiers_released()
     time.sleep(0.05)
-    with _kb.pressed(keyboard.Key.ctrl):
-        _kb.press("v")
-        _kb.release("v")
+    if CFG.get("output_method") == "type":
+        _kb.type(text)                # 逐字 Unicode 注入
+    else:
+        with _kb.pressed(keyboard.Key.ctrl):
+            _kb.press("v")
+            _kb.release("v")
     if prev is not None:
         threading.Timer(2.0, lambda: pyperclip.copy(prev)).start()
 
@@ -426,13 +509,14 @@ STATES = {   # 狀態 → (底色, 文字色, 主字, 副字)
     "err":  ("#7a2f00", "#ffffff", "✗ 沒聽到內容", "講大聲一點再試"),
     "mute": ("#8b1e1e", "#ffffff", "✗ 沒收到聲音", "麥克風靜音或選錯裝置"),
     "quit": ("#6b3f00", "#ffffff", "真的要關閉？再點一次 ✕", "點面板本體＝取消"),
+    "clip": ("#1f4e6b", "#ffffff", "📋 文字在剪貼簿，按 Ctrl+V", "搶不回原視窗，沒有亂貼"),
 }
 
 
-def ui(state, sub=None):
+def ui(state, sub=None, title=None):
     """從任何執行緒都能呼叫；實際更新會丟回 tk 主執行緒。"""
     if UI:
-        UI.set(state, sub)
+        UI.set(state, sub, title)
 
 
 class Panel:
@@ -441,6 +525,8 @@ class Panel:
     def __init__(self, tk):
         self.tk = tk
         self.root = tk.Tk()
+        # tk 預設把 callback 例外印到 stderr；pythonw 下 stderr 是 devnull＝全部消失
+        self.root.report_callback_exception = lambda t, v, tb: log_exc("面板", t, v, tb)
         self.root.overrideredirect(True)            # 無標題列
         self.root.attributes("-topmost", True)      # 永遠在最上層
         x, y = CFG.get("panel_pos") or self._default_pos()
@@ -567,11 +653,13 @@ class Panel:
         self.dopolish = not self.dopolish
         self.pol.config(fg=self.ON if self.dopolish else self.OFF)
 
-    def set(self, state, sub=None):
-        self.root.after(0, self._set, state, sub)
+    def set(self, state, sub=None, title=None):
+        self.root.after(0, self._set, state, sub, title)
 
-    def _set(self, state, sub):
+    def _set(self, state, sub, override=None):
         bg, fg, title, dsub = STATES[state]
+        if override:
+            title = override
         for w in (self.frame, self.title, self.sub, self.close, self.send, self.pol):
             w.config(bg=bg)
         self.title.config(text=title, fg=fg)
@@ -626,8 +714,10 @@ def _toggle(mode):
             hwnd, title, exe = _win_info()
             STATE["target"] = hwnd
             beep("start")
-            # 把目標視窗顯示在面板上——講之前就看得到字會去哪，不對就右鍵取消
-            ui("rec", f"→ {exe}｜右鍵取消")
+            # 目標視窗要放在「最大那行字」——放小字副標會被漏看，
+            # 結果就是講了半天字全跑到別的視窗去，還以為程式壞了（2026-07-26 實際發生）
+            ui("rec", "再點一下結束 · 右鍵取消",
+               title=f"● 錄音中 → {exe[:12]}")
             log(f"● 錄音中（{mode}）目標＝{exe}／{title}#{hwnd % 100000}")
             _watchdog = threading.Timer(CFG["max_seconds"], lambda: _toggle(mode))
             _watchdog.daemon = True
@@ -664,6 +754,15 @@ def _cancel():
 
 
 def worker():
+    while not STOP.is_set():
+        try:
+            _work_one()
+        except Exception as e:      # 這個迴圈死掉＝之後每次口述都只錄音不輸出
+            log_exc("工作執行緒", type(e), e, e.__traceback__)
+            ui("err", "處理失敗，看 dictate.log")
+
+
+def _work_one():
     while not STOP.is_set():
         try:
             mode, audio, target = JOBS.get(timeout=0.3)
@@ -703,12 +802,18 @@ def worker():
             if CFG["diary_also_paste"]:
                 paste(text)
         else:
-            on_target = _focus_target(target)
-            where = _win_desc()
             want_send = mode.endswith("send")
-            # 焦點不在原本那個視窗 → 只貼上、不按 Enter。
-            # 送錯視窗只是尷尬，「送錯視窗又自動送出」是直接把訊息發到別的對話去。
-            sent = want_send and on_target
+            if not _focus_target(target):
+                # 搶不回原視窗就**完全不貼**。以前這裡照貼，結果是送進當下的前景
+                # 視窗——貼到別人的對話框比「沒貼」糟糕得多，而且使用者只會覺得
+                # 「怎麼有時候會失敗」。改成放進剪貼簿、面板明講。
+                _set_clipboard(text)
+                log(f"⚠ 搶不回目標視窗 → 沒有貼上，文字放剪貼簿｜{text[:40]}")
+                ui("clip")
+                beep("err")
+                continue
+            where = _win_desc()
+            sent = want_send
             paste(text)
             if sent:
                 time.sleep(0.25)      # 等目標 app 吃完貼上，太快按 Enter 會送出空的
@@ -716,11 +821,10 @@ def worker():
                 _kb.release(keyboard.Key.enter)
             log(f"✓ {took:.1f}s / {len(text)} 字 → {'已送出' if sent else '已貼上'}"
                 f" 到 {where}｜{text[:40]}{'…' if len(text) > 40 else ''}")
-            if want_send and not sent:
-                log("⚠ 焦點已不在原目標視窗 → 只貼上，沒有自動送出")
-                ui("done", "視窗變了 · 只貼上沒送出")
-            else:
-                ui("done", f"{len(text)} 字 · {took:.1f}s")
+            # 標明貼去哪 + 文字仍在剪貼簿：真的沒進輸入框時，
+            # 直接 Ctrl+V 就能救回來，不用重講一次
+            ui("done", f"{len(text)} 字 · 也在剪貼簿",
+               title=f"✓ 已貼到 {_win_info(target)[2][:12]}")
         print(f"    {text[:120]}{'…' if len(text) > 120 else ''}", flush=True)
         beep("done")
 
@@ -766,12 +870,14 @@ def _start_backend():
         if LISTENER:
             LISTENER.stop()
 
+    # 每個 callback 都包起來：pynput 的監聽器只要在 callback 裡爆一次就整個停掉，
+    # 之後所有熱鍵都無聲失效
     LISTENER = keyboard.GlobalHotKeys({
-        hk["paste"]: lambda: _toggle(_mode(False)),   # 跟著面板的「✨整理」開關
-        hk["send"]: lambda: _toggle(_mode(True)),
-        hk["diary"]: lambda: _toggle("diary"),
-        hk["polish"]: lambda: _toggle("polish"),      # 強制整理，不管開關
-        hk["quit"]: _quit,
+        hk["paste"]: safe(lambda: _toggle(_mode(False)), "熱鍵 paste"),
+        hk["send"]: safe(lambda: _toggle(_mode(True)), "熱鍵 send"),
+        hk["diary"]: safe(lambda: _toggle("diary"), "熱鍵 diary"),
+        hk["polish"]: safe(lambda: _toggle("polish"), "熱鍵 polish"),
+        hk["quit"]: safe(_quit, "熱鍵 quit"),
     })
     LISTENER.start()
     STATE["ready"] = True
@@ -796,6 +902,9 @@ def _single_instance():
 
 def main():
     global UI
+    sys.excepthook = lambda t, v, tb: log_exc("主執行緒", t, v, tb)
+    threading.excepthook = lambda a: log_exc(f"執行緒 {a.thread.name}",
+                                             a.exc_type, a.exc_value, a.exc_traceback)
     if len(sys.argv) > 2 and sys.argv[1] == "--file":
         selftest(sys.argv[2])
         return
