@@ -705,6 +705,9 @@ class Panel:
                 self.sub.config(
                     text=f"{bar}  🔇 沒收到聲音" if REC.level < 0.002 else f"{bar}  收音中",
                     fg="#ff9a9a" if REC.level < 0.002 else "#9aa0a6")
+                # 目標即時跟著焦點跑——你錄音中切到別的輸入框，這裡就會跟著變，
+                # 顯示的永遠是「現在放開的話字會去哪」
+                self.title.config(text=f"● 錄音中 → {_win_info()[2][:12]}")
         except Exception:
             pass
         self.root.after(150, self._tick)
@@ -787,7 +790,12 @@ def _toggle(mode):
             dur = time.time() - STATE["t0"]
             STATE["mode"] = None
             audio = REC.end()
-            tgt = STATE.get("target")
+            # 目標在「講完的當下」決定，不是開始講的時候。
+            # 使用者常常是先點面板開始講、講到一半才點到要輸入的地方；
+            # 用開始時的視窗會把字送回舊視窗，症狀就是「在其他對話方塊就不行」。
+            # 面板有 NOACTIVATE，點面板本身不會改變前景視窗，所以這裡取到的
+            # 就是他現在真正在的地方。
+            tgt = _win_info()[0] or STATE.get("target")
             beep("stop")
             ui("work")
             log(f"■ 收音 {dur:.1f}s → 轉錄中…")
