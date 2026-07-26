@@ -130,18 +130,55 @@ DEFAULT_CFG = {
 }
 
 
-def _first_run_model():
-    """第一次產生設定檔時，依這台機器挑一個合理的預設模型。
+LADDER = ["tiny", "base", "small", "medium", "large-v3"]
 
-    預設值寫死 medium 是給有顯卡的開發機用的；打包版沒有捆 CUDA，
-    落到 CPU 跑 medium 要 6.7 秒（本機實測 22 核），第一印象就毀了。
-    有 GPU → medium；沒有 → 依核心數退到 small / base。
+
+def available_models():
+    """已經在本機、不用下載的模型。
+
+    打包版看 %LOCALAPPDATA%\\local-dictate\\models（安裝器會把 base 塞在這），
+    開發版看 faster-whisper 預設的 HuggingFace 快取。
+    """
+    roots = [HERE / "models"]
+    hub = Path.home() / ".cache" / "huggingface" / "hub"
+    if hub.exists():
+        roots.append(hub)
+    found = set()
+    for r in roots:
+        if not r.exists():
+            continue
+        for d in r.glob("models--Systran--faster-whisper-*"):
+            # 只算真的下載完的（有 snapshots 且裡面有東西）
+            if any(d.glob("snapshots/*/*")):
+                found.add(d.name.replace("models--Systran--faster-whisper-", ""))
+    return found
+
+
+def _first_run_model():
+    """第一次產生設定檔時挑一個預設模型。
+
+    兩件事要同時滿足，缺一個第一印象就毀了：
+      1. 這台機器跑得動（沒 GPU 卻用 medium＝每句等 6.7 秒）
+      2. **手上已經有這個模型**（不然第一次啟動要默默下載幾百 MB，
+         而使用者只會看到面板卡在「載入中」——2026-07-26 實裝測試踩到）
+    所以先算推薦值，再跟「已下載清單」取交集；沒有交集才真的去下載推薦值。
     """
     lib = os.path.join(os.path.dirname(os.__file__), "site-packages", "nvidia")
     if glob.glob(os.path.join(lib, "*", "bin")):
-        return "medium", 5
-    c = os.cpu_count() or 4
-    return ("small", 5) if c >= 8 else ("base", 1)
+        rec, beam = "medium", 5
+    else:
+        rec, beam = ("small", 5) if (os.cpu_count() or 4) >= 8 else ("base", 1)
+
+    have = available_models()
+    if rec in have or not have:
+        return rec, beam
+    # 推薦的還沒下載 → 在「已經有的」裡面挑最大的（但不超過推薦值）
+    cap = LADDER.index(rec)
+    usable = [m for m in have if m in LADDER and LADDER.index(m) <= cap]
+    if not usable:
+        return rec, beam
+    pick = max(usable, key=LADDER.index)
+    return pick, (1 if pick in ("tiny", "base") else 5)
 
 
 def load_cfg():
@@ -308,6 +345,14 @@ class Engine:
 
     def load(self):
         size = CFG["model"]
+        # 要下載的話先講一聲。不然使用者只看到面板卡在「載入中」，
+        # 而背後正在抓幾百 MB —— 那正是「以為程式壞了」的來源。
+        if size not in available_models():
+            mb = {"tiny": 75, "base": 141, "small": 464,
+                  "medium": 1779, "large-v3": 2948}.get(size)
+            ui("dl", f"{size}" + (f"（約 {mb} MB）" if mb else ""))
+            log(f"⬇ 本機還沒有 {size} 模型，開始下載"
+                + (f"（約 {mb} MB）" if mb else "") + "…只有第一次")
         # ⚠️ 只有打包版才改模型位置。
         # 打包版 → %LOCALAPPDATA%\local-dictate\models：安裝器能預先塞 base 進去，
         #          解除安裝時「要不要保留模型」也問得到正確位置。
@@ -831,6 +876,7 @@ UI = None
 
 STATES = {   # 狀態 → (底色, 文字色, 主字, 副字)
     "load": ("#3a3a3a", "#cccccc", "載入中…", "第一次要 5 秒"),
+    "dl":   ("#1f4e6b", "#ffffff", "⬇ 首次下載語音模型", "只有第一次，請等它跑完"),
     "idle": ("#2b2f36", "#e6e6e6", "🎤 點我開始講話", "講完再點一下"),
     "rec":  ("#8b1e1e", "#ffffff", "● 錄音中… 點我結束", "講完再點一下"),
     "work": ("#7a5c00", "#ffffff", "轉寫中…", "本機 · 約 1 秒"),
