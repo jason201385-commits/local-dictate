@@ -425,6 +425,7 @@ STATES = {   # 狀態 → (底色, 文字色, 主字, 副字)
     "done": ("#1e5f2e", "#ffffff", "✓ 已送進對話框", ""),
     "err":  ("#7a2f00", "#ffffff", "✗ 沒聽到內容", "講大聲一點再試"),
     "mute": ("#8b1e1e", "#ffffff", "✗ 沒收到聲音", "麥克風靜音或選錯裝置"),
+    "quit": ("#6b3f00", "#ffffff", "真的要關閉？再點一次 ✕", "點面板本體＝取消"),
 }
 
 
@@ -456,7 +457,9 @@ class Panel:
         self.close = tk.Label(self.frame, text="✕", bg="#2b2f36", fg="#888888",
                               font=("Microsoft JhengHei UI", 9))
         self.close.place(x=self.W - 20, y=6)
-        self.close.bind("<Button-1>", lambda e: self.quit())
+        # ✕ 就在面板角落，手滑一次引擎就沒了 → 要點兩次才關
+        self._close_armed = False
+        self.close.bind("<Button-1>", lambda e: self._close_click())
 
         # 兩個開關：整理（預設開）＝進對話框前先去口頭禪補標點；送出（預設關）
         self.dopolish = bool(CFG["polish"]["enabled"])
@@ -523,7 +526,24 @@ class Panel:
         if self._moved:
             self.root.geometry(f"+{wx + dx}+{wy + dy}")
 
+    def _close_click(self):
+        if self._close_armed:
+            self.quit()
+            return
+        self._close_armed = True
+        self._set("quit", None)
+        self.root.after(4000, self._disarm)      # 4 秒沒再點就自動放棄關閉
+
+    def _disarm(self):
+        if self._close_armed:
+            self._close_armed = False
+            self._set("idle", None)
+
     def _up(self, e):
+        if self._close_armed:        # 已經舉起關閉確認 → 點本體＝取消，不要順便開始錄音
+            self._disarm()
+            self._drag = None
+            return
         if self._moved:
             CFG["panel_pos"] = [self.root.winfo_x(), self.root.winfo_y()]
             try:
@@ -759,10 +779,34 @@ def _start_backend():
     log("就緒：點面板或按熱鍵都可以")
 
 
+_MUTEX = None
+
+
+def _single_instance():
+    """只准跑一份。兩個實例會同時註冊同一組全域熱鍵、同時開麥克風，
+    結果是講一次錄到兩份、貼兩次。用具名 mutex 擋掉（不能關掉這個 handle）。"""
+    global _MUTEX
+    try:
+        k = ctypes.windll.kernel32
+        _MUTEX = k.CreateMutexW(None, False, "Local\\local-dictate-single-instance")
+        return k.GetLastError() != 183      # ERROR_ALREADY_EXISTS
+    except Exception:
+        return True                          # 擋不了就放行，總比不能用好
+
+
 def main():
     global UI
     if len(sys.argv) > 2 and sys.argv[1] == "--file":
         selftest(sys.argv[2])
+        return
+    if not _single_instance():
+        log("已經有一個實例在跑了 → 這次不啟動")
+        try:    # pythonw 沒有主控台，用對話框告知，不然按了完全沒反應
+            ctypes.windll.user32.MessageBoxW(
+                0, "口述引擎已經在執行中了。\n\n小面板應該在螢幕角落，"
+                   "被蓋住的話拖曳其他視窗看看。", "local-dictate", 0x40)
+        except Exception:
+            pass
         return
     nogui = "--nogui" in sys.argv
     hk = CFG["hotkeys"]

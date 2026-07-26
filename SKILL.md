@@ -16,7 +16,10 @@ description: 本機繁體中文語音輸入（faster-whisper，音訊不出網�
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like '*dictate*' }
 ```
 
-沒有就雙擊 `啟動口述.bat`（無主控台視窗）。要看錯誤訊息改用 `除錯-顯示主控台.bat`。
+沒有就按 **`Ctrl+Alt+V`**（跑過 `建立快捷鍵.bat` 之後隨時可叫回），或雙擊 `啟動口述.bat`（無主控台視窗）。要看錯誤訊息改用 `除錯-顯示主控台.bat`。
+
+程式有具名 mutex 單一實例鎖：已經在跑時再啟動只會跳提示，不會產生第二個實例（兩個實例會搶同一組全域熱鍵、講一次錄兩份）。
+面板的 `✕` 要點兩次才會關（第一次只是詢問），避免手滑關掉。
 
 ## 排查順序（一律先看 log，不要用猜的）
 
