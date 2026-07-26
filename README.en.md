@@ -2,7 +2,9 @@
 
 **English** · [繁體中文](README.md)
 
-Click, speak, and the text appears wherever your cursor is. **The audio never leaves your machine.** No word limit, no subscription.
+Click, speak, and the text appears wherever your cursor is. No word limit, no subscription.
+
+**Your voice is turned into text entirely on your own machine and is never uploaded.** The only thing that ever leaves is the optional "cleanup" pass — and that sends the *already-transcribed text*, never the audio. One click on the panel turns it off.
 
 Windows + Python, running [faster-whisper](https://github.com/SYSTRAN/faster-whisper). Tuned for **Traditional Chinese**, but the engine handles any language Whisper supports.
 

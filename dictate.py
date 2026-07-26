@@ -74,7 +74,8 @@ DEFAULT_CFG = {
     "diary_also_paste": False,
     # 第一層清理：本機規則、永遠跑、0 延遲、不用 API key。
     # fillers 留空＝用內建清單（只收幾乎不可能是實詞的語助詞）。
-    "tidy": {"enabled": True, "fillers": []},
+    # structure：講「第一…第二…」時自動分行（只插換行、不改字）
+    "tidy": {"enabled": True, "structure": True, "fillers": []},
     "polish": {
         "enabled": True,
         # 依「字會貼進哪個 app」自動換整理風格。key 對應面板顯示的 app 名稱
@@ -390,9 +391,31 @@ _kb = keyboard.Controller()
 # 執行檔路徑（小寫）片段 → 看得懂的名字。
 # 因為 Claude Code 和 Claude 聊天版視窗標題都叫「Claude」、執行檔也都叫 claude.exe，
 # 只有安裝路徑分得出來（2026-07-26 實查）。
+# 白話化：使用者看得懂「📄 Word 文件」，看不懂「WINWORD.EXE」。
+# 由上往下比對，第一個命中的就用。要加自己的 app 就往這裡加一行。
 APP_NAMES = [
     ("claude-code", "Claude Code"),
     ("windowsapps\\claude", "Claude 聊天版"),
+    ("winword", "📄 Word"),
+    ("excel", "📊 Excel"),
+    ("powerpnt", "📽 PowerPoint"),
+    ("outlook", "✉️ Outlook"),
+    ("notepad", "📝 記事本"),
+    ("wordpad", "📝 WordPad"),
+    ("line", "💬 LINE"),
+    ("discord", "💬 Discord"),
+    ("telegram", "💬 Telegram"),
+    ("slack", "💬 Slack"),
+    ("code.exe", "VS Code"),
+    ("windowsterminal", "終端機"),
+    ("powershell", "終端機"),
+    ("cmd.exe", "終端機"),
+    ("chrome", "🌐 Chrome"),
+    ("msedge", "🌐 Edge"),
+    ("firefox", "🌐 Firefox"),
+    ("explorer", "📁 檔案總管"),
+    ("obsidian", "🗒 Obsidian"),
+    ("notion", "🗒 Notion"),
 ]
 
 
@@ -572,6 +595,26 @@ def _build_tidy():
 _TIDY = None
 
 
+# 「第一…第二…」自動分行。
+# ⚠️ 刻意只插入換行、**一個字都不改**——條列化很容易變成「幫你改寫」，
+#    而改寫就有可能改掉你的原意。只加換行的話最壞情況也只是排版醜，不會失真。
+_ORD_PAT = r"第[一二三四五六七八九十]+[點個項]?[，、,]?"
+_ORD_COUNT = re.compile(_ORD_PAT)                       # 數量：全部都算
+_ORD_SPLIT = re.compile(r"(?<!^)(?<![\n])\s*(" + _ORD_PAT + ")")   # 插入：句首不加換行
+
+
+def structure_local(text):
+    if not CFG.get("tidy", {}).get("structure", True):
+        return text
+    # 至少要有兩個序數才算「在條列」；只有一個「第一」通常是句子的一部分
+    # （「第一次用的時候」「這是第一版」都不該被動到）。
+    # ⚠️ 計數要用不含位置條件的 pattern：句首那個「第一」不插換行，但要算數量，
+    #    否則「第一點…第二點…」只會數到 1 個而不觸發。
+    if len(_ORD_COUNT.findall(text)) < 2:
+        return text
+    return _ORD_SPLIT.sub(lambda m: "\n" + m.group(1), text)
+
+
 def tidy_local(text):
     """本機清理。保守處理：寧可少刪，也不要把真的內容刪掉。"""
     global _TIDY
@@ -582,7 +625,7 @@ def tidy_local(text):
     out = text
     for rx, rep in _TIDY:
         out = rx.sub(rep, out)
-    out = out.strip()
+    out = structure_local(out).strip()
     # 全刪光了就代表規則太兇，退回原文
     return out or text
 
@@ -724,7 +767,7 @@ def ui(state, sub=None, title=None):
 
 
 class Panel:
-    W, H = 272, 78
+    W, H = 300, 78
 
     def __init__(self, tk):
         self.tk = tk
@@ -747,6 +790,12 @@ class Panel:
         self.close = tk.Label(self.frame, text="✕", bg="#2b2f36", fg="#888888",
                               font=("Microsoft JhengHei UI", 9))
         self.close.place(x=self.W - 20, y=6)
+        # 📋 救命按鈕：最常見的客服問題是「游標沒點進輸入框 → 字印不出來」。
+        # 面板永遠留著最後一次結果，點一下就能自己貼，不用重講一次。
+        self.copy = tk.Label(self.frame, text="📋", bg="#2b2f36", fg="#555555",
+                             font=("Microsoft JhengHei UI", 10), cursor="hand2")
+        self.copy.place(x=self.W - 48, y=6)
+        self.copy.bind("<Button-1>", lambda e: self.copy_last())
         # ✕ 就在面板角落，手滑一次引擎就沒了 → 要點兩次才關
         self._close_armed = False
         self.close.bind("<Button-1>", lambda e: self._close_click())
@@ -818,6 +867,17 @@ class Panel:
         if self._moved:
             self.root.geometry(f"+{wx + dx}+{wy + dy}")
 
+    def copy_last(self):
+        txt = STATE.get("last_text")
+        if not txt:
+            self._set("idle", "還沒有可複製的內容")
+            return
+        if _set_clipboard(txt):
+            self._set("clip", f"{len(txt)} 字已複製，去輸入框按 Ctrl+V")
+            log(f"📋 使用者手動複製最後結果（{len(txt)} 字）")
+        else:
+            self._set("err", "剪貼簿被佔用，複製失敗")
+
     def _close_click(self):
         if self._close_armed:
             self.quit()
@@ -885,8 +945,11 @@ class Panel:
         bg, fg, title, dsub = STATES[state]
         if override:
             title = override
-        for w in (self.frame, self.title, self.sub, self.close, self.send, self.pol):
+        for w in (self.frame, self.title, self.sub, self.close, self.send,
+                  self.pol, self.copy):
             w.config(bg=bg)
+        # 有東西可複製時 📋 才亮起來，沒有就維持暗色（不要給死按鈕）
+        self.copy.config(fg="#cccccc" if STATE.get("last_text") else "#555555")
         self.title.config(text=title, fg=fg)
         self.sub.config(text=sub if sub is not None else dsub, fg="#9aa0a6")
         self.close.config(fg=fg)
@@ -1039,6 +1102,7 @@ def _work_one():
                 # 視窗——貼到別人的對話框比「沒貼」糟糕得多，而且使用者只會覺得
                 # 「怎麼有時候會失敗」。改成放進剪貼簿、面板明講。
                 _set_clipboard(text)
+                STATE["last_text"] = text
                 log(f"⚠ 搶不回目標視窗 → 沒有貼上，文字放剪貼簿｜{text[:40]}")
                 ui("clip")
                 beep("err")
@@ -1053,10 +1117,9 @@ def _work_one():
                 _kb.release(keyboard.Key.enter)
             log(f"✓ {took:.1f}s / {len(text)} 字 → {'已送出' if sent else '已貼上'}"
                 f" 到 {where}［{finfo}］｜{text[:40]}{'…' if len(text) > 40 else ''}")
-            # 標明貼去哪 + 文字仍在剪貼簿：真的沒進輸入框時，
-            # 直接 Ctrl+V 就能救回來，不用重講一次
-            ui("done", f"{len(text)} 字 · 也在剪貼簿",
-               title=f"✓ 已貼到 {_win_info(target)[2][:12]}")
+            STATE["last_text"] = text      # 給面板的 📋 按鈕用
+            ui("done", f"{len(text)} 字 · 沒進去就按 📋",
+               title=f"✓ 已貼到 {_win_info(target)[2][:14]}")
         print(f"    {text[:120]}{'…' if len(text) > 120 else ''}", flush=True)
         beep("done")
 
