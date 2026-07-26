@@ -316,6 +316,34 @@ flowchart TD
 
 ---
 
+## 也可以當成 Claude Code skill 用
+
+同一個 repo，兩種用法。clone 進 skills 目錄，Claude 就能幫你裝、幫你調、幫你查 log：
+
+```bash
+git clone https://github.com/<你的帳號>/local-dictate.git ~/.claude/skills/local-dictate
+```
+
+Windows：
+
+```bash
+git clone https://github.com/<你的帳號>/local-dictate.git "$USERPROFILE/.claude/skills/local-dictate"
+```
+
+之後跟 Claude 說「口述裝不起來」「按了沒反應」「辨識不準」，它會自己讀 `SKILL.md` 路由到對應的 reference，跑 `doctor.py` / `tune.py`，看 `dictate.log` 反推根因——**不用你先把 README 讀完**。
+
+| 檔案 | Claude 什麼時候讀 |
+|---|---|
+| `SKILL.md` | 每次（刻意寫短） |
+| `references/setup.md` | 安裝、選模型、調參數 |
+| `references/troubleshoot.md` | 出狀況、要查 log |
+| `references/pitfalls.md` | 要改程式碼之前 |
+| `docs/macos.md` | 談移植 |
+
+`references/pitfalls.md` 就算你不用這個工具也值得看——裡面 11 條大多不是這個專案獨有的，是 Windows 桌面自動化與「把使用者內容餵給 LLM 加工」的通用陷阱。
+
+---
+
 ## 授權
 
 MIT。拿去改、拿去用、拿去賣都可以。
