@@ -60,9 +60,10 @@ DEFAULT_CFG = {
     # 那個選單會搶走鍵盤焦點並吃掉接下來的貼上。Alt+Enter 在很多程式是全螢幕/內容，
     # 同樣的問題。2026-07-26 實際踩到，症狀是「有時候貼得進去有時候不行」。
     # 字母鍵沒有這個問題。
+    # Z/X 就在 Ctrl、Alt 正上方，左手單手可按，不用整隻手跨過去。
     "hotkeys": {
-        "paste": "<ctrl>+<alt>+j",
-        "send": "<ctrl>+<alt>+k",
+        "paste": "<ctrl>+<alt>+z",
+        "send": "<ctrl>+<alt>+x",
         "diary": "<ctrl>+<alt>+d",
         "polish": "<ctrl>+<alt>+p",
         "quit": "<ctrl>+<alt>+q",

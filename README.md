@@ -60,11 +60,14 @@ Windows + Python，跑 [faster-whisper](https://github.com/SYSTRAN/faster-whispe
 
 | 熱鍵 | 動作 |
 |---|---|
-| `Ctrl+Alt+空白` | 上字 → 貼到游標 |
-| `Ctrl+Alt+Enter` | 上字 → 貼上並送出 |
+| `Ctrl+Alt+Z` | 上字 → 貼到游標 |
+| `Ctrl+Alt+X` | 上字 → 貼上並送出 |
 | `Ctrl+Alt+D` | 存進今天的口述日記檔（不干擾當前視窗） |
 | `Ctrl+Alt+P` | 強制整理後上字 |
 | `Ctrl+Alt+Q` | 結束 |
+| `Ctrl+Alt+V` | 啟動／叫回引擎（跑過 `建立快捷鍵.bat` 之後） |
+
+⚠️ **改熱鍵時不要用 `Alt`＋`Space` 或 `Alt`＋`Enter`。** pynput 註冊全域熱鍵時**不攔截按鍵**，底層的 `Alt+Space` 照樣傳給 Windows，會跳出視窗系統選單（還原／移動／大小／關閉）——那個選單是模態的，會搶走鍵盤焦點並吃掉接下來的貼上。症狀是「有時候貼得進去、有時候不行」，非常難查。`Alt+Enter` 在很多程式是全螢幕／內容，同一類問題。**用字母鍵。**
 
 ---
 
