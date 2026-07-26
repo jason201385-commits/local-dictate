@@ -37,6 +37,7 @@ else:
     HERE = Path(__file__).resolve().parent
 CFG_PATH = HERE / "config.json"
 VOCAB_PATH = HERE / "vocab.txt"
+MODELS_DIR = HERE / "models"
 
 # 第一次跑打包版時，把範例字典複製過去當起點（使用者才有東西可以改）
 if FROZEN and not VOCAB_PATH.exists():
@@ -266,14 +267,20 @@ class Engine:
 
     def load(self):
         size = CFG["model"]
+        # 模型統一放 HERE/models：打包版就是 %LOCALAPPDATA%\local-dictate\models，
+        # 安裝器可以預先把 base 塞進去，第一次啟動不用等 1.5GB 下載。
+        # 也讓解除安裝時「要不要保留模型」問得到正確的位置。
+        root = str(MODELS_DIR)
         if _gpu_ok:
             try:
-                self.model = WhisperModel(size, device="cuda", compute_type="int8_float16")
+                self.model = WhisperModel(size, device="cuda",
+                                          compute_type="int8_float16", download_root=root)
                 self.device = "GPU"
             except Exception as e:
                 log(f"GPU 載入失敗（{str(e)[:80]}）→ 改用 CPU")
         if self.model is None:
-            self.model = WhisperModel(size, device="cpu", compute_type="int8")
+            self.model = WhisperModel(size, device="cpu",
+                                      compute_type="int8", download_root=root)
             self.device = "CPU"
         # 暖機：一定要關 vad_filter，否則靜音會被 VAD 整段濾掉、encoder 根本沒跑，
         # 第一次真的口述還是要多等 1.5s（2026-07-26 實測踩到）。

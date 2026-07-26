@@ -40,19 +40,31 @@ UninstallDisplayIcon={app}\{#AppExeName}
 ; 免安裝需求說明：不需要 Python
 AppComments=Local Traditional-Chinese voice dictation. Audio never leaves your machine.
 
+; ⚠️ 繁體中文是 Inno Setup 的「非官方翻譯」，**預設安裝裡沒有這個檔**
+;    （2026-07-26 CI 實際踩到：Couldn't open include file ChineseTraditional.isl）。
+;    所以這裡用 FileExists 判斷：有就加繁中，沒有就只出英文。
+;    絕對不要讓一個翻譯檔有能力擋掉整個 release。
+#define ChtIsl AddBackslash(CompilerPath) + "Languages\ChineseTraditional.isl"
+#define HasCht FileExists(ChtIsl)
+
 [Languages]
-Name: "cht"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
+; 英文一定要在，而且要放第一個 —— Inno 至少需要一種語言
 Name: "en"; MessagesFile: "compiler:Default.isl"
+#if HasCht
+Name: "cht"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
+#endif
 
 [CustomMessages]
-cht.AutoStart=開機時自動啟動（背景執行，不佔畫面）
-cht.CreateDesktopIcon=建立桌面捷徑
-cht.LaunchAfter=現在就開始使用
-cht.KeepData=保留你的設定、專有名詞字典與語音模型？%n%n模型可能佔用數 GB。選「否」會一併刪除。
 en.AutoStart=Start automatically when Windows starts
 en.CreateDesktopIcon=Create a desktop shortcut
 en.LaunchAfter=Launch now
 en.KeepData=Keep your settings, vocabulary and downloaded models?%n%nModels can take several GB. Choosing No deletes them.
+#if HasCht
+cht.AutoStart=開機時自動啟動（背景執行，不佔畫面）
+cht.CreateDesktopIcon=建立桌面捷徑
+cht.LaunchAfter=現在就開始使用
+cht.KeepData=保留你的設定、專有名詞字典與語音模型？%n%n模型可能佔用數 GB。選「否」會一併刪除。
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"

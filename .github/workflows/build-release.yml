@@ -59,16 +59,48 @@ jobs:
           # ⚠️ CI 沒有麥克風也沒有互動桌面，這裡不啟動 GUI；
           #    真正的啟動/錄音/貼上測試必須在實機上做。
 
+      - name: 下載要內建的 base 模型（讓首次啟動不用等下載）
+        shell: pwsh
+        run: |
+          # base 約 141MB。刻意不用 tiny：本機實測 base 已經會把英文品牌名
+          # 聽成不相干的中文，tiny 只會更糟，第一印象就毀了。
+          # 也刻意不內建 medium：1.5GB 會讓每次改版都重傳一次。
+          python -c @"
+          from huggingface_hub import snapshot_download
+          p = snapshot_download('Systran/faster-whisper-base',
+                                local_dir='build/bundled-model/models--Systran--faster-whisper-base')
+          print('downloaded to', p)
+          "@
+          $mb = [math]::Round((Get-ChildItem build\bundled-model -Recurse -File |
+                Measure-Object Length -Sum).Sum / 1MB, 1)
+          Write-Host "內建模型大小: $mb MB"
+
       - name: 建 Inno Setup 安裝器
         shell: pwsh
         run: |
-          # windows-latest runner 已預裝 Inno Setup 6
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (Test-Path $iscc) {
-            & $iscc build\installer.iss
-          } else {
-            Write-Warning "找不到 Inno Setup，跳過安裝器（onedir 仍會上傳）"
+          if (!(Test-Path $iscc)) {
+            Write-Warning "找不到 Inno Setup，跳過安裝器（portable zip 仍會上傳）"
+            exit 0
           }
+          # runner 上的 Inno Setup 6.7.1 的 Languages\ 沒有繁中檔
+          # （2026-07-26 CI 實際踩到：Couldn't open include file ChineseTraditional.isl）。
+          # 從 issrc 原始碼倉庫抓（已實測此網址可用、內容為 6.5.0+ 繁中語系檔）。
+          # 抓不到就讓 installer.iss 的 FileExists 判斷退成英文版 ——
+          # 一個翻譯檔不該有能力擋掉整個 release。
+          $ProgressPreference = 'SilentlyContinue'
+          $lang = "C:\Program Files (x86)\Inno Setup 6\Languages\ChineseTraditional.isl"
+          if (!(Test-Path $lang)) {
+            $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseTraditional.isl"
+            try {
+              Invoke-WebRequest $url -OutFile $lang -TimeoutSec 30 -UseBasicParsing
+              Write-Host "已取得繁體中文語系檔 ($([math]::Round((Get-Item $lang).Length/1KB,1)) KB)"
+            } catch {
+              Write-Warning "抓不到繁中語系檔，安裝器只出英文：$($_.Exception.Message)"
+            }
+          }
+          & $iscc build\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 失敗，exit $LASTEXITCODE" }
 
       - name: 產生 SHA256
         shell: pwsh
