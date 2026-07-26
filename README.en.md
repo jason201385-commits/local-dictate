@@ -53,6 +53,18 @@ So this is a local one.
 
 ## Install
 
+**➡️ [Download `local-dictate-setup-*.exe` from Releases](https://github.com/jason201385-commits/local-dictate/releases/latest)**
+
+Download, double-click, next, done. **No Python, no Git, no terminal.**
+The installer bundles a speech model, so the first launch doesn't wait on a download.
+It's a per-user install — no admin prompt. Prefer no installer? Grab `local-dictate-portable.zip`.
+
+> ⚠️ **v0.1.0 is the first public build.** It has been verified on the dev machine and in CI,
+> but not yet through a full run on a clean Windows install. If it breaks, please open an issue
+> and attach `%LOCALAPPDATA%\local-dictate\dictate.log`.
+
+### From source
+
 ```bash
 git clone https://github.com/jason201385-commits/local-dictate.git
 cd local-dictate

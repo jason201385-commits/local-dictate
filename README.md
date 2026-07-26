@@ -12,16 +12,31 @@ Windows + Python，跑 [faster-whisper](https://github.com/SYSTRAN/faster-whispe
 
 ## 怎麼開始
 
-> **一鍵安裝檔製作中**（不需要 Python、下載後下一步下一步就好）。進度見 [ROADMAP.md](ROADMAP.md)。
-> 在那之前，目前的方式需要先裝 Python——**如果你沒裝過 Python，建議等安裝檔出來**，不用在這裡卡住。
+### 一般使用者：下載安裝檔（不需要 Python）
 
-**已經有 Python 的人，三步：**
+**➡️ [到 Releases 下載 `local-dictate-setup-*.exe`](https://github.com/jason201385-commits/local-dictate/releases/latest)**
 
-1. 綠色 `Code` 按鈕 → `Download ZIP` → 解壓縮
-2. 雙擊 **`安裝.bat`**（裝相依套件，會跑幾分鐘、畫面會滾很多英文，那是正常的）
-3. 雙擊 **`啟動口述.bat`** → 右下角出現小面板 → 可以講話了
+下載 → 雙擊 → 下一步 → 完成 → 桌面／開始功能表點開它。就這樣。
 
-第一次啟動會下載語音模型（約 1.5GB），**這段時間畫面不會有反應**，請耐心等。
+- **不需要 Python、不需要 Git、不需要開終端機**
+- 安裝檔已內建語音模型，**第一次啟動不用等下載**
+- per-user 安裝，**不會跳「需要系統管理員權限」**
+- 想試試看不想安裝：下載 `local-dictate-portable.zip`，解壓後直接執行 `local-dictate.exe`
+
+> ⚠️ **v0.1.0 是第一個公開版本**，只在開發機與 CI 上驗證過，還沒有在乾淨的電腦上跑完整流程。
+> 裝不起來或行為怪怪的，請開 issue 並附上 `%LOCALAPPDATA%\local-dictate\dictate.log`。
+
+### 開發者：從原始碼跑
+
+```bash
+git clone https://github.com/jason201385-commits/local-dictate.git
+cd local-dictate
+pip install -r requirements.txt      # 或雙擊 安裝.bat
+python doctor.py                     # 環境健檢
+python tune.py --apply               # 依硬體挑模型
+```
+
+然後雙擊 `啟動口述.bat`。第一次啟動會下載語音模型（依設定約 141MB–1.5GB）。
 
 ### 你會被問到的三件事，先講在前面
 
