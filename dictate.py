@@ -87,7 +87,9 @@ DEFAULT_CFG = {
 def load_cfg():
     cfg = json.loads(json.dumps(DEFAULT_CFG))
     if CFG_PATH.exists():
-        user = json.loads(CFG_PATH.read_text(encoding="utf-8"))
+        # utf-8-sig 不是龜毛：Windows 記事本、PowerShell 的 Out-File 存出來的
+        # UTF-8 都帶 BOM，用 "utf-8" 讀會直接讓 json 解析炸掉、程式起不來。
+        user = json.loads(CFG_PATH.read_text(encoding="utf-8-sig"))
         for k, v in user.items():
             if isinstance(v, dict) and isinstance(cfg.get(k), dict):
                 cfg[k].update(v)
@@ -137,7 +139,7 @@ except Exception:
 #    塞爆會先把「以下是繁體中文」這句指令切掉，反而變簡體（1.2.1 原始碼確認）。
 TERMS = []
 if VOCAB_PATH.exists():
-    TERMS = [t.strip() for t in VOCAB_PATH.read_text(encoding="utf-8").splitlines()
+    TERMS = [t.strip() for t in VOCAB_PATH.read_text(encoding="utf-8-sig").splitlines()
              if t.strip() and not t.strip().startswith("#")]
 VOCAB = "、".join(TERMS)[:300]
 INITIAL_PROMPT = "以下是繁體中文的口述內容。"
