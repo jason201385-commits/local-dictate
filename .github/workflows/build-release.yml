@@ -99,7 +99,11 @@ jobs:
               Write-Warning "抓不到繁中語系檔，安裝器只出英文：$($_.Exception.Message)"
             }
           }
-          & $iscc build\installer.iss
+          # 版本號從 tag 取，不要寫死在 .iss 裡
+          $ver = "$env:GITHUB_REF_NAME" -replace '^v', ''
+          if ($ver -notmatch '^\d+\.\d+(\.\d+)?') { $ver = "0.0.0" }
+          Write-Host "安裝器版本: $ver"
+          & $iscc "/DAppVersion=$ver" build\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC 失敗，exit $LASTEXITCODE" }
 
       - name: 產生 SHA256

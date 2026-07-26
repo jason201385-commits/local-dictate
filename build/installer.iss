@@ -12,7 +12,11 @@
 ;   · 開機啟動預設不勾 — 偷偷常駐會直接扣信任分。
 
 #define AppName "local-dictate"
-#define AppVersion "0.1.0"
+; 版本號由建置流程帶進來：ISCC /DAppVersion=0.1.2
+; 寫死會出現「v0.1.1 的 release 裡放著 setup-0.1.0.exe」這種事（2026-07-26 實際發生）。
+#ifndef AppVersion
+  #define AppVersion "0.0.0-dev"
+#endif
 #define AppPublisher "local-dictate contributors"
 #define AppURL "https://github.com/jason201385-commits/local-dictate"
 #define AppExeName "local-dictate.exe"
