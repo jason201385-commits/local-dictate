@@ -1,0 +1,21 @@
+# ⚠️ .gitignore 不支援「行尾註解」——寫成 `config.json  # 說明` 會被當成
+#    一整條字面樣式（含空白與中文），完全比對不到檔案。註解一定要自己一行。
+
+# 你的日記路徑、面板位置
+config.json
+
+# 你的品牌名／客戶名／專案代號
+vocab.txt
+
+# 你口述過的內容片段（前 40 字）與視窗標題
+dictate.log
+
+# 口述日記本體
+口述日記/
+*.wav
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

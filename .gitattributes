@@ -1,0 +1,7 @@
+# .bat 必須是 CRLF，否則 cmd 可能解析失敗
+*.bat text eol=crlf
+
+# 其餘讓 git 自動處理
+* text=auto
+*.py text
+*.md text

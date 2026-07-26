@@ -1,0 +1,18 @@
+# 核心（必裝）
+faster-whisper>=1.2.0      # 需要 >=1.2：本專案用到 transcribe(hotwords=...)
+sounddevice>=0.5           # 麥克風錄音
+pynput>=1.8                # 全域熱鍵 + 模擬 Ctrl+V
+pyperclip>=1.9             # 剪貼簿
+numpy>=1.24
+
+# 強烈建議（沒裝也能跑，但輸出可能夾雜簡體字）
+opencc-python-reimplemented>=0.1.7
+
+# 只有「✨整理」功能會用到（沒裝／沒設 API key 就自動退回貼原文）
+requests>=2.31
+
+# GPU 加速（NVIDIA 顯卡才需要；沒裝會自動退 CPU，只是慢很多）
+# 這三個提供 ctranslate2 需要的 CUDA DLL，dictate.py 會自己把它們的 bin 加進 PATH
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+nvidia-cuda-nvrtc-cu12
