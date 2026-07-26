@@ -1,0 +1,128 @@
+name: Build Windows release
+
+# 打 tag 就出一版；也可以手動觸發做煙霧測試。
+# 公開 repo 用標準 GitHub-hosted runner 不計 Actions 費用。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安裝相依（不含 CUDA）
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # 刻意過濾掉 nvidia-* ：那三個裝完約 1.9GB，而且是 proprietary 授權，
+          # 能不能重新散布要另外確認。GPU 加速留給安裝後選配。
+          (Get-Content requirements.txt) |
+            Where-Object { $_ -notmatch '^\s*nvidia-' } |
+            Set-Content requirements-ci.txt
+          python -m pip install -r requirements-ci.txt
+          python -m pip install pyinstaller
+
+      - name: 靜態檢查
+        shell: pwsh
+        run: |
+          python -m py_compile dictate.py doctor.py tune.py setup_shortcuts.py
+          Write-Host "compile OK"
+
+      - name: 純函式測試（不需要麥克風／GPU）
+        shell: pwsh
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, ".")
+          import dictate as D
+
+          # 本機清理：該刪的刪、不該刪的一個都不能動
+          assert D.tidy_local("嗯今天我把報價單改好了") == "今天我把報價單改好了"
+          assert D.tidy_local("那個檔案我改好了") == "那個檔案我改好了"
+          assert D.tidy_local("然後我就把它關掉了") == "然後我就把它關掉了"
+
+          # 條列分行：只插換行、不改字
+          src = "我覺得有三個重點第一是速度第二是準確度第三是隱私"
+          out = D.tidy_local(src)
+          assert "\n" in out and out.replace("\n", "") == src, out
+          assert D.tidy_local("第一次用的時候覺得很難") == "第一次用的時候覺得很難"
+
+          # 熱鍵字串一定要解析得出來，否則使用者會拿到「按了沒反應」
+          for combo in D.DEFAULT_CFG["hotkeys"].values():
+              mods, vk = D.parse_hotkey(combo)
+              assert vk, combo
+
+          # app 白話名稱
+          assert D._app_label(r"C:\x\WINWORD.EXE", "WINWORD") == "📄 Word"
+          print("all pure-function tests passed")
+          PY
+
+      - name: PyInstaller 打包
+        shell: pwsh
+        run: python -m PyInstaller build/local-dictate.spec --noconfirm
+
+      - name: 確認產物存在且能顯示版本
+        shell: pwsh
+        run: |
+          $exe = "dist\local-dictate\local-dictate.exe"
+          if (!(Test-Path $exe)) { throw "找不到產物 $exe" }
+          $mb = [math]::Round((Get-ChildItem dist\local-dictate -Recurse -File |
+                Measure-Object Length -Sum).Sum / 1MB, 1)
+          Write-Host "onedir 大小: $mb MB"
+          # ⚠️ CI 沒有麥克風也沒有互動桌面，這裡不啟動 GUI；
+          #    真正的啟動/錄音/貼上測試必須在實機上做。
+
+      - name: 建 Inno Setup 安裝器
+        shell: pwsh
+        run: |
+          # windows-latest runner 已預裝 Inno Setup 6
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            & $iscc build\installer.iss
+          } else {
+            Write-Warning "找不到 Inno Setup，跳過安裝器（onedir 仍會上傳）"
+          }
+
+      - name: 產生 SHA256
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          Compress-Archive -Path dist\local-dictate\* -DestinationPath artifacts\local-dictate-portable.zip -Force
+          Get-ChildItem dist\*.exe -ErrorAction SilentlyContinue | Copy-Item -Destination artifacts
+          Get-ChildItem artifacts | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+            "$h  $($_.Name)" | Out-File artifacts\SHA256SUMS.txt -Append -Encoding utf8
+          }
+          Get-Content artifacts\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-dictate-windows
+          path: artifacts/
+
+      - name: 發佈 release（只在打 tag 時）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          body: |
+            ### 安裝
+            下載 `local-dictate-setup-*.exe`，雙擊安裝。**不需要 Python。**
+
+            免安裝版：`local-dictate-portable.zip`，解壓後執行 `local-dictate.exe`。
+
+            ### 注意
+            - 這一版**不含 GPU 加速**（CUDA 元件約 1.9GB，另外提供）
+            - 第一次啟動請看小面板，設定與紀錄放在 `%LOCALAPPDATA%\local-dictate\`
+            - Windows 可能顯示「不明發行者」——原因與程式要做的事寫在 README
+            - 校驗碼見 `SHA256SUMS.txt`

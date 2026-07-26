@@ -25,9 +25,27 @@ import time
 import winsound
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+# 打包成 exe 之後，程式目錄通常在 Program Files 或 %LOCALAPPDATA%\Programs 底下，
+# 而且升級/解除安裝會整個換掉——設定與紀錄寫在那裡會被洗掉，有些位置還沒有寫入權限。
+# 所以：程式碼從 bundle 讀，使用者資料一律寫到 %LOCALAPPDATA%\local-dictate\。
+FROZEN = getattr(sys, "frozen", False)
+BUNDLE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+if FROZEN:
+    HERE = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "local-dictate"
+    HERE.mkdir(parents=True, exist_ok=True)
+else:
+    HERE = Path(__file__).resolve().parent
 CFG_PATH = HERE / "config.json"
 VOCAB_PATH = HERE / "vocab.txt"
+
+# 第一次跑打包版時，把範例字典複製過去當起點（使用者才有東西可以改）
+if FROZEN and not VOCAB_PATH.exists():
+    _seed = BUNDLE / "vocab.example.txt"
+    if _seed.exists():
+        try:
+            VOCAB_PATH.write_text(_seed.read_text(encoding="utf-8-sig"), encoding="utf-8")
+        except Exception:
+            pass
 
 # pythonw（無主控台）啟動時 sys.stdout 是 None，print() 會直接炸掉
 if sys.stdout is None:
@@ -109,6 +127,20 @@ DEFAULT_CFG = {
 }
 
 
+def _first_run_model():
+    """第一次產生設定檔時，依這台機器挑一個合理的預設模型。
+
+    預設值寫死 medium 是給有顯卡的開發機用的；打包版沒有捆 CUDA，
+    落到 CPU 跑 medium 要 6.7 秒（本機實測 22 核），第一印象就毀了。
+    有 GPU → medium；沒有 → 依核心數退到 small / base。
+    """
+    lib = os.path.join(os.path.dirname(os.__file__), "site-packages", "nvidia")
+    if glob.glob(os.path.join(lib, "*", "bin")):
+        return "medium", 5
+    c = os.cpu_count() or 4
+    return ("small", 5) if c >= 8 else ("base", 1)
+
+
 def load_cfg():
     cfg = json.loads(json.dumps(DEFAULT_CFG))
     if CFG_PATH.exists():
@@ -121,6 +153,7 @@ def load_cfg():
             else:
                 cfg[k] = v
     else:
+        cfg["model"], cfg["beam_size"] = _first_run_model()
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     if not cfg.get("diary_dir"):
         cfg["diary_dir"] = str(Path.home() / "Documents" / "口述日記")

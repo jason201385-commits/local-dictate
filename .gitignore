@@ -19,3 +19,10 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# 打包產物
+dist/
+build/_work/
+build/bundled-model/
+*.spec.bak
+requirements-ci.txt
