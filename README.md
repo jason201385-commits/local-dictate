@@ -6,6 +6,25 @@ Windows + Python，跑 [faster-whisper](https://github.com/SYSTRAN/faster-whispe
 
 ---
 
+## 30 秒上手
+
+<img src="docs/panel-guide.svg" alt="小面板操作說明" width="100%">
+
+```mermaid
+flowchart LR
+    A["① 點一下你要打字的地方<br/>（看到游標在閃）"] --> B["② 點面板<br/>或按 Ctrl+Alt+Z"]
+    B --> C["③ 講話<br/>看音量條有沒有跳"]
+    C --> D["④ 再點一次 / 再按一次"]
+    D --> E["⑤ 字出現在你剛剛<br/>點的那個地方"]
+    style A fill:#1f4e6b,stroke:#4a90b8,color:#fff
+    style C fill:#8b1e1e,stroke:#c14b4b,color:#fff
+    style E fill:#1e5f2e,stroke:#3fa057,color:#fff
+```
+
+> **不是按住講話**，是「按一下開始 → 講 → 再按一下結束」，像錄音機的開關。
+
+---
+
 ## 為什麼要自己做一個
 
 市面上的 AI 聽寫工具大多是雲端的（音訊要上傳、有字數上限、要月費）。而幾個「本來應該可以用」的選項，實際踩下去是這樣（2026-07 實測，之後可能會變）：
@@ -241,6 +260,25 @@ python setup_shortcuts.py --remove       # 全部移除
 
 **第一件事：跑 `python doctor.py`。**
 八成的「裝不起來／沒反應」都會在健檢裡直接指出來（麥克風權限沒開、缺 CUDA、模型還沒下載、資料夾不能寫…）。
+
+照這張圖走，不用猜：
+
+```mermaid
+flowchart TD
+    S["按了沒反應 / 字沒出現"] --> P{"螢幕角落<br/>有小面板嗎？"}
+    P -- 沒有 --> P1["程式沒在跑<br/>按 Ctrl+Alt+V 或雙擊 啟動口述.bat"]
+    P -- 有 --> R{"錄音時<br/>音量條會跳嗎？"}
+    R -- 不會跳 --> R1["麥克風收不到<br/>跑 doctor.py 看權限與裝置"]
+    R -- 會跳 --> T{"面板最大那行<br/>寫的目標對嗎？"}
+    T -- 不對 --> T1["右鍵取消<br/>先點對的輸入框再重講"]
+    T -- 對 --> C["面板說已貼上但字沒出現<br/>＝輸入框沒有游標"]
+    C --> C1["文字一定還在剪貼簿<br/>點進輸入框按 Ctrl+V"]
+    style S fill:#7a2f00,stroke:#c07040,color:#fff
+    style C1 fill:#1f4e6b,stroke:#4a90b8,color:#fff
+    style P1 fill:#1e5f2e,stroke:#3fa057,color:#fff
+    style R1 fill:#1e5f2e,stroke:#3fa057,color:#fff
+    style T1 fill:#1e5f2e,stroke:#3fa057,color:#fff
+```
 
 **防毒軟體跳警告？**
 這支程式會註冊**全域鍵盤熱鍵**、讀寫**剪貼簿**、並**模擬 Ctrl+V 按鍵**——這三件事跟鍵盤側錄程式的行為特徵重疊，某些防毒軟體會示警。程式碼全部在這個 repo 裡，可以自己看過再決定是否加白名單。它不連任何伺服器，除非你開著「✨整理」（那時只送轉寫出來的文字）。

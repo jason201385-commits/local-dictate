@@ -951,6 +951,92 @@ def selftest(path):
     return text
 
 
+# ── 全域熱鍵：走 Windows 原生 RegisterHotKey ─────────────────────────────
+# ⚠️ 不要用 pynput 的 GlobalHotKeys。它是低階鉤子、**不會攔截按鍵**，
+# 組合鍵照樣往下傳給目標程式，造成兩個實際踩到的災情（2026-07-26）：
+#   1. Ctrl+Alt+Space → Windows 跳出視窗系統選單，搶走焦點吃掉貼上
+#   2. Ctrl+Alt+<字母> → Ctrl+Alt 在 Windows 等於 AltGr，Qt 程式（LINE）
+#      會把它當字元打進輸入框：按兩次就多出「ZZ」。換字母沒用，會變 BB、GG。
+# RegisterHotKey 是系統層註冊，組合鍵由 OS 消化，目標程式完全收不到。
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 1, 2, 4, 8, 0x4000
+WM_HOTKEY, WM_QUIT = 0x0312, 0x0012
+
+
+def parse_hotkey(s):
+    """把 '<ctrl>+<alt>+z' 轉成 (modifiers, virtual-key)。"""
+    mods, vk = 0, None
+    for raw in s.lower().replace(" ", "").split("+"):
+        p = raw.strip("<>")
+        if p in ("ctrl", "control"):
+            mods |= MOD_CONTROL
+        elif p == "alt":
+            mods |= MOD_ALT
+        elif p == "shift":
+            mods |= MOD_SHIFT
+        elif p in ("win", "cmd", "super"):
+            mods |= MOD_WIN
+        elif p == "space":
+            vk = 0x20
+        elif p in ("enter", "return"):
+            vk = 0x0D
+        elif len(p) > 1 and p[0] == "f" and p[1:].isdigit() and 1 <= int(p[1:]) <= 24:
+            vk = 0x6F + int(p[1:])          # F1 = 0x70
+        elif len(p) == 1:
+            vk = ord(p.upper())
+        else:
+            return None, None
+    return (mods, vk) if vk else (None, None)
+
+
+class NativeHotkeys(threading.Thread):
+    """RegisterHotKey 必須跟訊息迴圈在同一條執行緒，所以整包放在這裡。"""
+
+    daemon = True
+
+    def __init__(self, bindings):      # {"<ctrl>+<alt>+z": callback, ...}
+        super().__init__(name="hotkeys")
+        self.bindings = bindings
+        self.ok, self.failed = [], []
+        self._tid = None
+
+    def run(self):
+        u = ctypes.windll.user32
+        self._tid = ctypes.windll.kernel32.GetCurrentThreadId()
+        actions = {}
+        for i, (combo, cb) in enumerate(self.bindings.items(), start=1):
+            mods, vk = parse_hotkey(combo)
+            if not vk:
+                self.failed.append((combo, "看不懂的寫法"))
+                continue
+            if u.RegisterHotKey(None, i, mods | MOD_NOREPEAT, vk):
+                actions[i] = cb
+                self.ok.append(combo)
+            else:
+                # 多半是被其他常駐程式先註冊走了
+                self.failed.append((combo, "已被其他程式佔用"))
+        msg = wintypes.MSG()
+        last = {}
+        while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == WM_HOTKEY:
+                cb = actions.get(msg.wParam)
+                if not cb:
+                    continue
+                # 防彈跳：實測同一次按鍵偶爾會送出兩則 WM_HOTKEY（MOD_NOREPEAT
+                # 擋不掉），多觸發一次就會讓「按一下開始、再按一下結束」整個錯亂。
+                now = time.monotonic()
+                if now - last.get(msg.wParam, 0) < 0.30:
+                    continue
+                last[msg.wParam] = now
+                # 不要在訊息迴圈裡做事，否則錄音期間會收不到下一次熱鍵
+                threading.Thread(target=safe(cb, "熱鍵"), daemon=True).start()
+        for i in actions:
+            u.UnregisterHotKey(None, i)
+
+    def stop(self):
+        if self._tid:
+            ctypes.windll.user32.PostThreadMessageW(self._tid, WM_QUIT, 0, 0)
+
+
 LISTENER = None
 
 
@@ -975,19 +1061,21 @@ def _start_backend():
         if LISTENER:
             LISTENER.stop()
 
-    # 每個 callback 都包起來：pynput 的監聽器只要在 callback 裡爆一次就整個停掉，
-    # 之後所有熱鍵都無聲失效
-    LISTENER = keyboard.GlobalHotKeys({
-        hk["paste"]: safe(lambda: _toggle(_mode(False)), "熱鍵 paste"),
-        hk["send"]: safe(lambda: _toggle(_mode(True)), "熱鍵 send"),
-        hk["diary"]: safe(lambda: _toggle("diary"), "熱鍵 diary"),
-        hk["polish"]: safe(lambda: _toggle("polish"), "熱鍵 polish"),
-        hk["quit"]: safe(_quit, "熱鍵 quit"),
+    LISTENER = NativeHotkeys({
+        hk["paste"]: lambda: _toggle(_mode(False)),
+        hk["send"]: lambda: _toggle(_mode(True)),
+        hk["diary"]: lambda: _toggle("diary"),
+        hk["polish"]: lambda: _toggle("polish"),      # 強制整理，不管開關
+        hk["quit"]: _quit,
     })
     LISTENER.start()
+    time.sleep(0.4)                                   # 等註冊結果
+    if LISTENER.failed:
+        for combo, why in LISTENER.failed:
+            log(f"⚠ 熱鍵 {combo} 註冊失敗（{why}）→ 改用面板，或改 config.json 換一組")
     STATE["ready"] = True
     ui("idle")
-    log("就緒：點面板或按熱鍵都可以")
+    log(f"就緒：點面板或按熱鍵都可以（已註冊 {len(LISTENER.ok)} 組）")
 
 
 _MUTEX = None
