@@ -1,0 +1,95 @@
+# -*- coding: utf-8 -*-
+"""不需要麥克風／GPU／視窗的純函式測試。CI 跑這支。
+
+這裡的每一條都對應一個真的踩過的坑，不是形式測試：
+  · 清理規則誤刪內容 → 使用者的話被改掉，而且不會發現
+  · 條列分行改到字 → 同上
+  · 熱鍵字串解析不出來 → 使用者拿到一個「按了沒反應」的版本
+  · app 名稱對照壞掉 → 面板顯示執行檔名，非工程師看不懂
+
+用法：python tests/test_pure.py
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import dictate as D          # noqa: E402
+
+fails = []
+
+
+def check(name, got, want):
+    if got == want:
+        print(f"  ok   {name}")
+    else:
+        print(f"  FAIL {name}\n       got  {got!r}\n       want {want!r}")
+        fails.append(name)
+
+
+def check_true(name, cond, detail=""):
+    if cond:
+        print(f"  ok   {name}")
+    else:
+        print(f"  FAIL {name} {detail}")
+        fails.append(name)
+
+
+print("[本機清理] 該刪的")
+check("句首語助詞", D.tidy_local("嗯今天我把報價單改好了"), "今天我把報價單改好了")
+check("夾在逗號中間", D.tidy_local("我改好了，嗯，然後發了一篇"), "我改好了，然後發了一篇")
+check("就是說", D.tidy_local("就是說我覺得可以"), "我覺得可以")
+check("連續重複字", D.tidy_local("我我我覺得可以"), "我覺得可以")
+
+print("\n[本機清理] 絕對不能被動到的（誤刪比留著糟糕得多）")
+check("『那個』是實詞", D.tidy_local("那個檔案我改好了"), "那個檔案我改好了")
+check("『然後』是連接詞", D.tidy_local("然後我就把它關掉了"), "然後我就把它關掉了")
+check("『就是』是實詞", D.tidy_local("就是這個問題"), "就是這個問題")
+check("正常句不動", D.tidy_local("我想想看"), "我想想看")
+check("英文品牌名不動", D.tidy_local("easyknowai 的報價單"), "easyknowai 的報價單")
+
+print("\n[條列分行] 只插換行、一個字都不能改")
+src = "我覺得有三個重點第一是速度第二是準確度第三是隱私"
+out = D.tidy_local(src)
+check_true("三個序數會分行", "\n" in out, out)
+check("分行後字元完全相同", out.replace("\n", ""), src)
+
+src2 = "第一點先確認麥克風第二點再檢查權限"
+out2 = D.tidy_local(src2)
+check_true("句首序數也要算數量", "\n" in out2, out2)
+check("句首序數不加前導換行", out2.replace("\n", ""), src2)
+
+check("單一序數不動 A", D.tidy_local("第一次用的時候覺得很難"), "第一次用的時候覺得很難")
+check("單一序數不動 B", D.tidy_local("這是第一版，我們之後會改"), "這是第一版，我們之後會改")
+
+print("\n[熱鍵] 每個預設值都要解析得出來")
+for name, combo in D.DEFAULT_CFG["hotkeys"].items():
+    mods, vk = D.parse_hotkey(combo)
+    check_true(f"{name} = {combo}", bool(vk), "parse 失敗")
+
+print("\n[熱鍵] 不可以用 Alt+Space / Alt+Enter")
+# 這兩個會讓底層組合鍵傳給 Windows：Alt+Space 跳系統選單搶焦點、
+# Alt+Enter 在很多程式是全螢幕。實際踩過，症狀是「有時候貼得進去有時候不行」。
+for name, combo in D.DEFAULT_CFG["hotkeys"].items():
+    mods, vk = D.parse_hotkey(combo)
+    bad = (mods & D.MOD_ALT) and vk in (0x20, 0x0D)
+    check_true(f"{name} 沒踩 Alt+Space/Enter", not bad, combo)
+
+print("\n[app 白話名稱]")
+check("Word", D._app_label(r"C:\x\WINWORD.EXE", "WINWORD"), "📄 Word")
+check("LINE", D._app_label(r"C:\x\LINE.exe", "LINE"), "💬 LINE")
+check("Claude Code",
+      D._app_label(r"C:\x\AppData\Roaming\Claude\claude-code\2.1\claude.exe", "claude"),
+      "Claude Code")
+check("未知的走 fallback", D._app_label(r"C:\x\weird.exe", "weird"), "weird")
+
+print("\n[設定] 預設值健全性")
+check_true("polish 有 providers", bool(D.DEFAULT_CFG["polish"].get("providers")))
+check_true("tidy 預設開啟", D.DEFAULT_CFG["tidy"]["enabled"] is True)
+m, b = D._first_run_model()
+check_true("首次啟動模型在合法清單內", m in ("base", "small", "medium", "large-v3"), m)
+
+print()
+if fails:
+    print(f"❌ {len(fails)} 項失敗：" + "、".join(fails))
+    sys.exit(1)
+print("✅ 全部通過")
