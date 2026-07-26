@@ -267,10 +267,12 @@ class Engine:
 
     def load(self):
         size = CFG["model"]
-        # 模型統一放 HERE/models：打包版就是 %LOCALAPPDATA%\local-dictate\models，
-        # 安裝器可以預先把 base 塞進去，第一次啟動不用等 1.5GB 下載。
-        # 也讓解除安裝時「要不要保留模型」問得到正確的位置。
-        root = str(MODELS_DIR)
+        # ⚠️ 只有打包版才改模型位置。
+        # 打包版 → %LOCALAPPDATA%\local-dictate\models：安裝器能預先塞 base 進去，
+        #          解除安裝時「要不要保留模型」也問得到正確位置。
+        # 開發版 → 維持 faster-whisper 預設的 HuggingFace 快取。
+        #          硬改成專案目錄會讓已經下載好的模型全部失效、重下一次好幾 GB。
+        root = str(MODELS_DIR) if FROZEN else None
         if _gpu_ok:
             try:
                 self.model = WhisperModel(size, device="cuda",
