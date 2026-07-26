@@ -55,9 +55,14 @@ DEFAULT_CFG = {
     #                   只在 paste 完全沒用的程式上才考慮。
     # 兩種都會先把文字放進剪貼簿，真的沒進去時你可以自己 Ctrl+V 救回來。
     "output_method": "paste",
+    # ⚠️ 不要用 <space> 或 <enter> 搭 Alt。pynput 註冊全域熱鍵時**不會攔截按鍵**，
+    # 底層的 Alt+Space 照樣傳給 Windows → 跳出視窗系統選單（還原/移動/大小/關閉），
+    # 那個選單會搶走鍵盤焦點並吃掉接下來的貼上。Alt+Enter 在很多程式是全螢幕/內容，
+    # 同樣的問題。2026-07-26 實際踩到，症狀是「有時候貼得進去有時候不行」。
+    # 字母鍵沒有這個問題。
     "hotkeys": {
-        "paste": "<ctrl>+<alt>+<space>",
-        "send": "<ctrl>+<alt>+<enter>",
+        "paste": "<ctrl>+<alt>+j",
+        "send": "<ctrl>+<alt>+k",
         "diary": "<ctrl>+<alt>+d",
         "polish": "<ctrl>+<alt>+p",
         "quit": "<ctrl>+<alt>+q",
@@ -394,6 +399,35 @@ def _win_info(hwnd=None):
         return hwnd, (b.value or "?")[:36], exe
     except Exception:
         return hwnd or 0, "?", "?"
+
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
+                ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
+                ("rcCaret", wintypes.RECT)]
+
+
+def _focus_info(hwnd):
+    """貼上前記下『目標視窗裡到底哪個控制項有焦點、有沒有文字游標』。
+
+    Ctrl+V 送到視窗之後，是由「有鍵盤焦點的控制項」處理的。視窗是前景不代表
+    輸入框有游標——LINE、Electron 這種自繪介面尤其常見：看起來在聊天視窗裡，
+    但焦點其實在訊息列表上，貼上就無聲消失。
+    caret=0 通常代表沒有傳統文字游標（Qt/Chromium 自己畫游標時也會是 0，
+    所以只能當線索、不能當判斷依據）。"""
+    try:
+        u = ctypes.windll.user32
+        tid = u.GetWindowThreadProcessId(hwnd, None)
+        g = GUITHREADINFO()
+        g.cbSize = ctypes.sizeof(GUITHREADINFO)
+        if u.GetGUIThreadInfo(tid, ctypes.byref(g)):
+            return (f"focus={(g.hwndFocus or 0) % 100000} "
+                    f"caret={(g.hwndCaret or 0) % 100000} flags={g.flags}")
+    except Exception:
+        pass
+    return "?"
 
 
 def _win_desc(hwnd=None):
@@ -879,6 +913,7 @@ def _work_one():
                 beep("err")
                 continue
             where = _win_desc()
+            finfo = _focus_info(target)
             sent = want_send
             paste(text)
             if sent:
@@ -886,7 +921,7 @@ def _work_one():
                 _kb.press(keyboard.Key.enter)
                 _kb.release(keyboard.Key.enter)
             log(f"✓ {took:.1f}s / {len(text)} 字 → {'已送出' if sent else '已貼上'}"
-                f" 到 {where}｜{text[:40]}{'…' if len(text) > 40 else ''}")
+                f" 到 {where}［{finfo}］｜{text[:40]}{'…' if len(text) > 40 else ''}")
             # 標明貼去哪 + 文字仍在剪貼簿：真的沒進輸入框時，
             # 直接 Ctrl+V 就能救回來，不用重講一次
             ui("done", f"{len(text)} 字 · 也在剪貼簿",
