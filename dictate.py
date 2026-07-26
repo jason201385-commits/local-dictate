@@ -85,11 +85,23 @@ DEFAULT_CFG = {
             "LINE": "這是聊天訊息，保持口語與短句，不要改成書面語。",
             "Claude 聊天版": "這是要問 AI 的問題，保持原本的問法，不要幫他改得更「正式」。",
         },
-        # 2026-07-26 實測延遲：gpt-oss-120b 2.3s ✅／deepseek-v4-flash 15s 且常 503／
-        # nemotron-super-49b 24-38s ❌。潤稿要能貼游標就只能用快的。
-        "model": "openai/gpt-oss-120b",
-        "fallbacks": ["deepseek-ai/deepseek-v4-flash", "moonshotai/kimi-k2.6"],
-        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        # 依序嘗試，前一個不能用就換下一個。判斷「不能用」的規則：
+        #   key_env 有填但環境變數不存在 → 跳過（不會浪費一次連線）
+        #   localhost 連不上 → 這次啟動內不再重試
+        # 想完全不出網：把 local 那筆留著、其餘刪掉（或 enabled 設 false）。
+        # 各家免費額度與設定方式見 docs/providers.md。
+        "providers": [
+            {"name": "local", "url": "http://localhost:11434/v1/chat/completions",
+             "model": "qwen3:4b", "key_env": None},
+            {"name": "nvidia", "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+             "model": "openai/gpt-oss-120b", "key_env": "NVIDIA_API_KEY"},
+            {"name": "groq", "url": "https://api.groq.com/openai/v1/chat/completions",
+             "model": "llama-3.3-70b-versatile", "key_env": "GROQ_API_KEY"},
+            {"name": "cerebras", "url": "https://api.cerebras.ai/v1/chat/completions",
+             "model": "llama3.3-70b", "key_env": "CEREBRAS_API_KEY"},
+            {"name": "openrouter", "url": "https://openrouter.ai/api/v1/chat/completions",
+             "model": "meta-llama/llama-3.3-70b-instruct:free", "key_env": "OPENROUTER_API_KEY"},
+        ],
         "timeout": 30,
         "_note": "潤稿只把『已轉好的文字』送雲端，不送音訊、不送螢幕內容。要 100% 離線設 false。",
     },
@@ -592,13 +604,55 @@ POLISH_SYS = (
 )
 
 
+_DEAD_PROVIDERS = set()      # 這次啟動內連不上的，不要每句都重試一次
+
+
+def probe_local_providers():
+    """啟動時就把本機 LLM 探測完。
+
+    不做這步的話，沒裝 ollama 的人第一次口述要多等約 5 秒（HTTP 連線逾時），
+    而且那 5 秒剛好落在「第一次使用」——體驗最差的位置。用 socket 連一下
+    只要 0.4 秒，而且可以在背景做完。"""
+    import socket
+    from urllib.parse import urlparse
+    for pr in CFG["polish"].get("providers") or []:
+        u = urlparse(pr.get("url", ""))
+        if u.hostname not in ("localhost", "127.0.0.1"):
+            continue
+        s = socket.socket()
+        s.settimeout(0.4)
+        try:
+            s.connect((u.hostname, u.port or 80))
+            log(f"本機 LLM 就緒：{pr.get('name')} @ {u.port}（整理不會出網）")
+        except Exception:
+            _DEAD_PROVIDERS.add(pr.get("name"))
+        finally:
+            s.close()
+
+
+def _candidates():
+    """把設定攤成可用的 provider 清單。舊格式（單一 url/model/fallbacks）也吃。"""
+    p = CFG["polish"]
+    out = []
+    for pr in p.get("providers") or []:
+        if pr.get("name") in _DEAD_PROVIDERS:
+            continue
+        env = pr.get("key_env")
+        key = os.environ.get(env) if env else None
+        if env and not key:
+            continue                      # 沒設 key 就別浪費一次連線
+        out.append((pr.get("name", "?"), pr["url"], pr["model"], key))
+    if not out and p.get("url"):          # 舊格式相容
+        key = os.environ.get("NVIDIA_API_KEY")
+        if key:
+            for m in [p.get("model")] + list(p.get("fallbacks") or []):
+                if m:
+                    out.append(("nvidia", p["url"], m, key))
+    return out
+
+
 def polish(text, app=None):
     import requests
-    key = os.environ.get("NVIDIA_API_KEY")
-    if not key:
-        # 本機那層已經跑過了，所以「沒 key」不等於完全沒整理
-        log("（沒有 NVIDIA_API_KEY → 只用本機清理，不做 LLM 整理）")
-        return text
     p = CFG["polish"]
     styles = p.get("app_styles", {})
     style = styles.get(app) or styles.get("default") or ""
@@ -609,29 +663,40 @@ def polish(text, app=None):
     # （2026-07-26 實測：18 秒口述 → 吐回 1998 字的規格書），長度會爆掉 → 直接丟棄。
     limit = int(len(text) * 1.5) + 40
     user_msg = f"<逐字稿>\n{text}\n</逐字稿>\n\n只輸出整理後的逐字稿本身。"
-    for model in [p["model"]] + list(p.get("fallbacks", [])):
+    cands = _candidates()
+    if not cands:
+        log("（沒有可用的 LLM provider → 只用本機清理。設定方式見 docs/providers.md）")
+        return text
+    for i, (name, url, model, key) in enumerate(cands):
+        local = "localhost" in url or "127.0.0.1" in url
         try:
-            r = requests.post(p["url"],
-                              headers={"Authorization": f"Bearer {key}"},
+            r = requests.post(url,
+                              headers={"Authorization": f"Bearer {key}"} if key else {},
                               json={"model": model, "temperature": 0.2,
                                     "max_tokens": min(4000, len(text) * 3 + 200),
                                     "messages": [{"role": "system", "content": sys_msg},
                                                  {"role": "user", "content": user_msg}]},
-                              timeout=p.get("timeout", 30))
+                              timeout=3 if local else p.get("timeout", 30))
             r.raise_for_status()
             out = r.json()["choices"][0]["message"]["content"].strip()
             if not out:
                 continue
             if len(out) > limit:
-                log(f"⚠ {model} 整理結果異常膨脹（{len(text)}→{len(out)} 字，"
+                log(f"⚠ {name}/{model} 整理結果異常膨脹（{len(text)}→{len(out)} 字，"
                     f"上限 {limit}）→ 丟棄，改用原文")
                 return text
-            if model != p["model"]:
-                log(f"（潤稿改用備援 {model}）")
+            if i:
+                log(f"（整理改用備援 {name}/{model}）")
             return out
         except Exception as e:
-            log(f"⚠ {model} 潤稿失敗（{str(e)[:60]}）")
-    log("⚠ 潤稿全數失敗 → 改貼原文")
+            msg = str(e)[:60]
+            if local and ("Connection" in msg or "refused" in msg or "timed out" in msg):
+                # 沒裝本機 LLM 是常態，不要每句都吵、也不要每句都等連線逾時
+                _DEAD_PROVIDERS.add(name)
+                log(f"（{name} 連不上 → 這次啟動不再嘗試本機 LLM）")
+            else:
+                log(f"⚠ {name}/{model} 整理失敗（{msg}）")
+    log("⚠ 所有 provider 都失敗 → 只用本機清理的結果")
     return text
 
 
@@ -1114,6 +1179,7 @@ def _start_backend():
         ui("err", "模型載入失敗，看 dictate.log")
         return
     REC.open()          # 麥克風常開，不要每次錄音才開（開開關關會拿到靜音串流）
+    probe_local_providers()   # 先探測，別讓第一次口述付連線逾時的錢
     threading.Thread(target=worker, daemon=True).start()
 
     def _quit():
