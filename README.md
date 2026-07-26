@@ -90,11 +90,25 @@ flowchart LR
 
 ---
 
+## 不確定自己的電腦跑不跑得動？讓它自己量
+
+```bash
+python tune.py            # 剖析硬體 → 給你這台該用的設定（秒出，不下載模型）
+python tune.py --bench    # 在你這台實際跑基準測試，用真數字決定
+python tune.py --apply    # 把結論寫進 config.json
+```
+
+`--bench` 會用系統內建的語音合成做一段中文樣本，實跑建議值附近的幾個模型，**挑出「你這台能在 2.5 秒內轉完」的最大模型**。不用看規格表猜。
+
+`tune.py` 與 `doctor.py` 都是跨平台的，Mac / Linux 也能跑，會誠實告訴你缺什麼。
+
+---
+
 ## 系統需求
 
 | 項目 | 需求 | 沒有會怎樣 |
 |---|---|---|
-| 作業系統 | **Windows** | 用到 `winsound`、Win32 視窗 API，macOS / Linux 目前不支援 |
+| 作業系統 | **Windows** | 口述引擎本體用了整套 Win32 API。**macOS 移植對照表見 [docs/macos.md](docs/macos.md)**——轉寫核心本來就跨平台，缺的是熱鍵／視窗／焦點那層 |
 | Python | **3.10+** | — |
 | 麥克風 | 任何一支 | — |
 | **Windows 麥克風權限** | 必須開啟 | **關著的話一定收不到聲音**，而且不會有明顯錯誤 |
