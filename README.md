@@ -1,5 +1,7 @@
 # local-dictate — 本機繁中語音輸入
 
+**繁體中文** · [English](README.en.md)
+
 按一下講話，字直接出現在游標所在的地方。**音訊完全不離開你的電腦**，沒有字數上限，不用訂閱。
 
 Windows + Python，跑 [faster-whisper](https://github.com/SYSTRAN/faster-whisper)。專門為**繁體中文**調過。
