@@ -13,18 +13,32 @@
 
 ---
 
-## P0 · 一鍵安裝檔（正在做）
+## P0 · 一鍵安裝檔 ✅ 已發佈（v0.1.0 / v0.1.1）
 
 **目標**：使用者只下載一個 `local-dictate-setup.exe`，不需要 Python、Git、終端機，
 而且**不用網路就能完成第一次聽寫**。
 
-- [ ] PyInstaller `--onedir --windowed` 打包（**不要**先追求 onefile）
-- [ ] Inno Setup 安裝器，`PrivilegesRequired=lowest`（per-user，不跳 UAC）
-- [ ] 安裝器內含 `base` 模型（141MB），首次啟動零下載
-- [ ] 資料寫在 `%LOCALAPPDATA%\local-dictate\`，不要寫進安裝目錄
-- [ ] 固定 `AppId`，升級覆蓋而不是裝出第二份
-- [ ] 解除安裝時**詢問**是否保留模型與字典，不要默默刪掉幾 GB
-- [ ] 在乾淨 Windows VM 走完整流程：安裝 → 首次啟動 → 錄音 → 轉寫 → 貼上 → 升級覆蓋 → 解除安裝
+- [x] PyInstaller `--onedir --windowed` 打包（**不要**先追求 onefile）
+- [x] Inno Setup 安裝器，`PrivilegesRequired=lowest`（per-user，不跳 UAC）
+- [x] 安裝器內含 `base` 模型（141MB），首次啟動零下載
+- [x] 資料寫在 `%LOCALAPPDATA%\local-dictate\`，不要寫進安裝目錄
+- [x] 固定 `AppId`，升級覆蓋而不是裝出第二份
+- [x] 解除安裝時**詢問**是否保留模型與字典，不要默默刪掉幾 GB
+- [ ] 在**乾淨 Windows VM** 走完整流程 ← 唯一還沒做的
+
+**實裝驗證紀錄（2026-07-26，在開發機上）**：下載 → SHA256 校驗相符 → 靜默安裝 exit 0
+（245MB／1172 檔）→ 內建 base 落在正確位置 → 執行 → 靜默解除安裝 exit 0、目錄清乾淨。
+過程中抓到「首次啟動選了沒內建的模型」，已於 v0.1.1 修正。
+
+⚠️ 這不等於乾淨機器驗證——開發機上有一堆「剛好裝過」的東西。真正的驗證還是要 VM。
+
+## P0 · GitHub Actions 自動出 release ✅
+
+- [x] `windows-latest` runner：鎖版本 → 跑測試 → build onedir → build installer → 出 SHA256 → 上傳 release
+- [x] 公開 repo 用標準 runner 不計費
+- [x] 32 項純函式測試（含「熱鍵不可以是 Alt+Space/Enter」的回歸測試）
+
+⚠️ 麥克風、熱鍵、GPU **CI 測不到**，仍需實機驗證。
 
 **已知要處理的打包坑**（來自 codex 的評估）：
 `ctranslate2` 的 `.pyd`/DLL、`av`/FFmpeg DLL、`sounddevice`/PortAudio DLL、
@@ -64,7 +78,11 @@ Tk/Tcl 資料目錄、OpenCC 字典資料、CA certificate bundle。**關閉 UPX
 - [x] app 名稱白話化（`WINWORD.EXE` → 📄 Word、`LINE.exe` → 💬 LINE）
 - [x] 錄音時顯示目標視窗 ＋ 即時音量條
 - [x] `✕` 兩段式確認，避免手滑關掉
+- [x] 面板直接標示快捷鍵（使用者不會知道有熱鍵，除非面板自己講）
+- [x] 每 2 秒重新宣告最上層（不然被壓到底層就再也叫不回來）
+- [x] 提示音改成合成正弦音＋包絡（方波沒有包絡＝刺耳的「滴滴嘟嘟」）
 - [ ] 三色狀態邊框（待命灰／錄音紅脈動／轉寫藍）
+- [ ] 首次啟動精靈（見 P1）
 
 ## P2 · 整理層（零成本趨近 Typeless）
 
