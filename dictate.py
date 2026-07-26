@@ -64,7 +64,9 @@ DEFAULT_CFG = {
     "to_traditional": True,
     "samplerate": 16000,
     "max_seconds": 600,
-    "beep": True,
+    # 提示音：soft = 合成正弦＋包絡（預設）／beep = 舊的方波／off = 靜音
+    "sound": "soft",
+    "beep": True,                 # 舊欄位，保留相容；sound 沒設時才看它
     "restore_clipboard": False,
     # 文字怎麼送進目標視窗：
     #   "paste"（預設）= 剪貼簿 + 模擬 Ctrl+V
@@ -215,15 +217,54 @@ def canonicalize(s):
     return s
 
 
-def beep(kind):
-    if not CFG["beep"]:
-        return
-    tone = {"start": (880, 90), "stop": (620, 90), "done": (1250, 70),
-            "err": (300, 250)}[kind]
+# ── 提示音 ──────────────────────────────────────────────────────────────
+# winsound.Beep 產生的是**純方波、沒有包絡**，所以聽起來就是「滴滴嘟嘟」的機械音
+# （2026-07-26 使用者回饋原話）。改成合成正弦音＋起音/收音包絡，
+# 兩個音構成上行/下行的短提示，接近手機錄音開始/結束的感覺。
+SOUNDS = {                       # (頻率序列, 每個音長度, 音量)
+    "start": ((587.33, 880.00), 0.075, 0.22),   # D5→A5 上行＝開始聽
+    "stop":  ((880.00, 587.33), 0.075, 0.20),   # A5→D5 下行＝結束
+    "done":  ((1046.50,), 0.055, 0.14),         # 輕輕一聲＝好了
+    "err":   ((392.00, 329.63), 0.11, 0.20),    # 低沉下行＝有問題
+}
+_SR_OUT = 44100
+_wave_cache = {}
+
+
+def _make_wave(freqs, dur, vol):
+    parts = []
+    for f in freqs:
+        n = int(_SR_OUT * dur)
+        t = np.arange(n) / _SR_OUT
+        w = np.sin(2 * np.pi * f * t)
+        # 包絡：12ms 起音、25ms 收音。沒有這個就會有爆音，也就是方波刺耳的來源
+        env = np.clip(np.minimum(t / 0.012, (dur - t) / 0.025), 0.0, 1.0)
+        parts.append(w * env)
+    return (np.concatenate(parts) * vol).astype(np.float32)
+
+
+def _play(wave):
     try:
-        winsound.Beep(*tone)
+        sd.play(wave, _SR_OUT, blocking=False)
     except Exception:
         pass
+
+
+def beep(kind):
+    style = CFG.get("sound", "soft" if CFG.get("beep", True) else "off")
+    if style == "off":
+        return
+    if style == "beep":                       # 舊的方波，想要的人自己開
+        tone = {"start": (880, 90), "stop": (620, 90),
+                "done": (1250, 70), "err": (300, 250)}[kind]
+        try:
+            winsound.Beep(*tone)
+        except Exception:
+            pass
+        return
+    if kind not in _wave_cache:
+        _wave_cache[kind] = _make_wave(*SOUNDS[kind])
+    threading.Thread(target=_play, args=(_wave_cache[kind],), daemon=True).start()
 
 
 LOG_PATH = HERE / "dictate.log"
@@ -885,8 +926,15 @@ class Panel:
             GWL_EXSTYLE, NOACTIVATE, TOOLWINDOW = -20, 0x08000000, 0x00000080
             cur = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
             u.SetWindowLongW(hwnd, GWL_EXSTYLE, cur | NOACTIVATE | TOOLWINDOW)
-            # 不下 SetWindowPos(FRAMECHANGED) 的話新樣式不會生效
-            u.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
+            # ⚠️ 這裡以前帶了 SWP_NOZORDER（0x0004），等於「改樣式但不要動 Z 順序」。
+            #    WS_EX_TOPMOST 的位元有設不代表視窗真的在最上層那一層 ——
+            #    真正決定的是 SetWindowPos 的 HWND_TOPMOST。少了它，面板被其他視窗
+            #    壓下去之後就再也上不來（2026-07-26 使用者回饋：「他被推到底層之後
+            #    就一直在底層，我必須關掉網頁到最底層才能用他」）。
+            HWND_TOPMOST = -1
+            SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_FRAMECHANGED = 1, 2, 0x10, 0x20
+            u.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                           SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_FRAMECHANGED)
             self._hwnd = hwnd
         except Exception as e:
             log(f"（NOACTIVATE 設定失敗，可忽略：{str(e)[:60]}）")
@@ -961,9 +1009,30 @@ class Panel:
         self.dopolish = not self.dopolish
         self.pol.config(fg=self.ON if self.dopolish else self.OFF)
 
+    _topmost_n = 0
+
+    def _keep_on_top(self):
+        """每 ~2 秒重新宣告一次最上層。
+
+        只在建立時設一次是不夠的：其他程式也把自己設成 topmost、或全螢幕程式
+        搶走那一層時，面板就會被壓下去而且再也上不來。NOACTIVATE 視窗尤其明顯，
+        因為它永遠不會被使用者點成前景而自然浮上來。
+        成本很低（一次 SetWindowPos），但這是「面板不見了」的唯一可靠解法。
+        """
+        try:
+            if not self._hwnd:
+                return
+            u = ctypes.windll.user32
+            u.SetWindowPos(self._hwnd, -1, 0, 0, 0, 0, 1 | 2 | 0x10)
+        except Exception:
+            pass
+
     def _tick(self):
         """錄音時把即時音量畫出來——不然你要講完 28 秒才發現麥克風根本沒收到音
         （2026-07-26 實際發生）。"""
+        self._topmost_n = (self._topmost_n + 1) % 13   # 150ms × 13 ≈ 2 秒
+        if self._topmost_n == 0:
+            self._keep_on_top()
         try:
             if self._cur == "rec":
                 lv = min(1.0, REC.level / 0.06)
@@ -1035,6 +1104,9 @@ def _toggle(mode):
     global _watchdog
     with LOCK:
         if STATE["mode"] is None:
+            # 先放提示音再開始收音，不然那聲提示會被錄進去
+            beep("start")
+            time.sleep(0.12)
             if not REC.begin():
                 ui("mute", "麥克風開不起來")
                 beep("err")
@@ -1044,7 +1116,6 @@ def _toggle(mode):
             # 記住「你在哪個視窗開始講的」，轉好之後貼回同一個地方
             hwnd, title, exe = _win_info()
             STATE["target"] = hwnd
-            beep("start")
             # 目標視窗要放在「最大那行字」——放小字副標會被漏看，
             # 結果就是講了半天字全跑到別的視窗去，還以為程式壞了（2026-07-26 實際發生）
             ui("rec", "再點一下結束 · 右鍵取消",
