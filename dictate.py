@@ -874,11 +874,28 @@ def polish(text, app=None):
 # ── 浮動視窗：不用記熱鍵，點一下就講 ───────────────────────────────────
 UI = None
 
+def pretty_hotkey(s):
+    """'<ctrl>+<alt>+z' → 'Ctrl+Alt+Z'（給人看的，不是給程式解析的）"""
+    names = {"ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt", "shift": "Shift",
+             "win": "Win", "cmd": "Win", "space": "空白", "enter": "Enter",
+             "return": "Enter"}
+    out = []
+    for raw in str(s).split("+"):
+        p = raw.strip().strip("<>").lower()
+        out.append(names.get(p, p.upper()))
+    return "+".join(out)
+
+
+# 使用者不會知道有快捷鍵，除非面板自己講（2026-07-26 使用者回饋：
+# 面板沉到底層時她不知道可以用熱鍵叫，是被口頭告知才知道的）
+HK_MAIN = pretty_hotkey(CFG["hotkeys"]["paste"])
+HK_SEND = pretty_hotkey(CFG["hotkeys"]["send"])
+
 STATES = {   # 狀態 → (底色, 文字色, 主字, 副字)
     "load": ("#3a3a3a", "#cccccc", "載入中…", "第一次要 5 秒"),
     "dl":   ("#1f4e6b", "#ffffff", "⬇ 首次下載語音模型", "只有第一次，請等它跑完"),
-    "idle": ("#2b2f36", "#e6e6e6", "🎤 點我開始講話", "講完再點一下"),
-    "rec":  ("#8b1e1e", "#ffffff", "● 錄音中… 點我結束", "講完再點一下"),
+    "idle": ("#2b2f36", "#e6e6e6", "🎤 點我開始講話", f"或按 {HK_MAIN}"),
+    "rec":  ("#8b1e1e", "#ffffff", "● 錄音中… 點我結束", f"再點一下或按 {HK_MAIN}"),
     "work": ("#7a5c00", "#ffffff", "轉寫中…", "本機 · 約 1 秒"),
     "pol":  ("#4a3d7a", "#ffffff", "整理中…", "去口頭禪 · 補標點"),
     "done": ("#1e5f2e", "#ffffff", "✓ 已送進對話框", ""),
@@ -1164,7 +1181,7 @@ def _toggle(mode):
             STATE["target"] = hwnd
             # 目標視窗要放在「最大那行字」——放小字副標會被漏看，
             # 結果就是講了半天字全跑到別的視窗去，還以為程式壞了（2026-07-26 實際發生）
-            ui("rec", "再點一下結束 · 右鍵取消",
+            ui("rec", f"再點一下 / {HK_MAIN} 結束 · 右鍵取消",
                title=f"● 錄音中 → {exe[:12]}")
             log(f"● 錄音中（{mode}）目標＝{exe}／{title}#{hwnd % 100000}")
             _watchdog = threading.Timer(CFG["max_seconds"], lambda: _toggle(mode))
