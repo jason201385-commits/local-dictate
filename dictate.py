@@ -248,40 +248,79 @@ def _resample(x, src_sr, dst_sr):
 
 
 class Recorder:
+    """⚠️ 串流開一次就一直開著，不要每次錄音都 open/close。
+
+    2026-07-26 實測：反覆開關會拿到「開得起來但整段靜音」的串流——
+    前一條還沒完全釋放，下一條就拿到空的。症狀是時好時壞，而且 whisper
+    對著靜音會產生幻覺（吐出「多謝您收睇時局新聞，再會！」這種句子）。
+    改成常開之後，錄音只是切換「要不要把 callback 的資料收起來」。
+    """
+
     def __init__(self):
         self.stream = None
-        self.frames = []
         self.rate = SR
-
-    def start(self):
         self.frames = []
-        for rate in (SR, None):        # 先試 16k，裝置不給就用它的原生取樣率再降頻
+        self.active = False
+        self.level = 0.0          # 給面板畫即時音量條
+        self.lock = threading.Lock()
+        self.device = "?"
+
+    def open(self):
+        last = None
+        for rate in (SR, None):    # 先試 16k，裝置不給就用它的原生取樣率再降頻
             try:
-                r = rate or int(sd.query_devices(sd.default.device[0])["default_samplerate"])
+                dev = sd.query_devices(sd.default.device[0])
+                r = rate or int(dev["default_samplerate"])
                 self.stream = sd.InputStream(samplerate=r, channels=1, dtype="float32",
-                                             callback=self._cb)
+                                             blocksize=int(r * 0.05), callback=self._cb)
                 self.stream.start()
                 self.rate = r
+                self.device = str(dev["name"])[:34]
+                log(f"麥克風就緒：{self.device} @ {r}Hz（常開）")
                 return True
             except Exception as e:
                 last = e
-        log(f"❌ 開麥克風失敗：{last}")
+        log(f"❌ 開麥克風失敗：{str(last)[:100]}")
         return False
 
-    def _cb(self, indata, frames, t, status):
-        self.frames.append(indata.copy())
-
-    def stop(self):
+    def ensure(self):
+        """串流被系統關掉（拔麥克風、切換裝置、睡眠喚醒）時自動重開。"""
         try:
-            self.stream.stop()
-            self.stream.close()
+            if self.stream is not None and self.stream.active:
+                return True
+        except Exception:
+            pass
+        try:
+            if self.stream is not None:
+                self.stream.close()
         except Exception:
             pass
         self.stream = None
-        if not self.frames:
+        log("麥克風串流不在了 → 重新開啟")
+        return self.open()
+
+    def _cb(self, indata, frames, t, status):
+        x = indata.reshape(-1)
+        self.level = float(np.sqrt((x ** 2).mean()))
+        if self.active:
+            with self.lock:
+                self.frames.append(x.copy())
+
+    def begin(self):
+        if not self.ensure():
+            return False
+        with self.lock:
+            self.frames = []
+        self.active = True
+        return True
+
+    def end(self):
+        self.active = False
+        with self.lock:
+            fr, self.frames = self.frames, []
+        if not fr:
             return np.zeros(0, dtype=np.float32)
-        audio = np.concatenate(self.frames, axis=0).reshape(-1).astype(np.float32)
-        return _resample(audio, self.rate, SR)
+        return _resample(np.concatenate(fr).astype(np.float32), self.rate, SR)
 
 
 # ── 輸出：貼到游標 ──────────────────────────────────────────────────────
@@ -568,6 +607,8 @@ class Panel:
         self._moved = False
         self._revert = None
         self._hwnd = None
+        self._cur = "load"
+        self.root.after(150, self._tick)     # 錄音時畫即時音量條
         self._noactivate()
         # Tk 在視窗真正 map 之後還會動樣式，所以延遲再補一次
         self.root.after(600, self._noactivate)
@@ -653,10 +694,26 @@ class Panel:
         self.dopolish = not self.dopolish
         self.pol.config(fg=self.ON if self.dopolish else self.OFF)
 
+    def _tick(self):
+        """錄音時把即時音量畫出來——不然你要講完 28 秒才發現麥克風根本沒收到音
+        （2026-07-26 實際發生）。"""
+        try:
+            if self._cur == "rec":
+                lv = min(1.0, REC.level / 0.06)
+                n = int(lv * 12)
+                bar = "█" * n + "▁" * (12 - n)
+                self.sub.config(
+                    text=f"{bar}  🔇 沒收到聲音" if REC.level < 0.002 else f"{bar}  收音中",
+                    fg="#ff9a9a" if REC.level < 0.002 else "#9aa0a6")
+        except Exception:
+            pass
+        self.root.after(150, self._tick)
+
     def set(self, state, sub=None, title=None):
         self.root.after(0, self._set, state, sub, title)
 
     def _set(self, state, sub, override=None):
+        self._cur = state
         bg, fg, title, dsub = STATES[state]
         if override:
             title = override
@@ -705,7 +762,8 @@ def _toggle(mode):
     global _watchdog
     with LOCK:
         if STATE["mode"] is None:
-            if not REC.start():
+            if not REC.begin():
+                ui("mute", "麥克風開不起來")
                 beep("err")
                 return
             STATE["mode"] = mode
@@ -728,7 +786,7 @@ def _toggle(mode):
             m = STATE["mode"]          # 錄音中按任何一個熱鍵都算「結束」，模式以開始時為準
             dur = time.time() - STATE["t0"]
             STATE["mode"] = None
-            audio = REC.stop()
+            audio = REC.end()
             tgt = STATE.get("target")
             beep("stop")
             ui("work")
@@ -747,7 +805,7 @@ def _cancel():
         if _watchdog:
             _watchdog.cancel()
         STATE["mode"] = None
-        REC.stop()
+        REC.end()
         beep("err")
         ui("err", "已取消，沒有貼上任何東西")
         log("✗ 使用者取消這次錄音")
@@ -860,6 +918,7 @@ def _start_backend():
         log(f"❌ 模型載入失敗：{str(e)[:150]}")
         ui("err", "模型載入失敗，看 dictate.log")
         return
+    REC.open()          # 麥克風常開，不要每次錄音才開（開開關關會拿到靜音串流）
     threading.Thread(target=worker, daemon=True).start()
 
     def _quit():
