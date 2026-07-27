@@ -167,7 +167,7 @@ python tune.py --apply    # 把結論寫進 config.json
 ## 安裝
 
 ```bash
-git clone https://github.com/<你的帳號>/local-dictate.git
+git clone https://github.com/jason201385-commits/local-dictate.git
 cd local-dictate
 ```
 
@@ -372,7 +372,7 @@ git clone https://github.com/jason201385-commits/local-dictate.git ~/.claude/ski
 Windows：
 
 ```bash
-git clone https://github.com/<你的帳號>/local-dictate.git "$USERPROFILE/.claude/skills/local-dictate"
+git clone https://github.com/jason201385-commits/local-dictate.git "$USERPROFILE/.claude/skills/local-dictate"
 ```
 
 之後跟 Claude 說「口述裝不起來」「按了沒反應」「辨識不準」，它會自己讀 `SKILL.md` 路由到對應的 reference，跑 `doctor.py` / `tune.py`，看 `dictate.log` 反推根因——**不用你先把 README 讀完**。
