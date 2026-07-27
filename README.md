@@ -366,7 +366,7 @@ flowchart TD
 同一個 repo，兩種用法。clone 進 skills 目錄，Claude 就能幫你裝、幫你調、幫你查 log：
 
 ```bash
-git clone https://github.com/<你的帳號>/local-dictate.git ~/.claude/skills/local-dictate
+git clone https://github.com/jason201385-commits/local-dictate.git ~/.claude/skills/local-dictate
 ```
 
 Windows：
