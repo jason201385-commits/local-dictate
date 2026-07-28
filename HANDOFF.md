@@ -1,4 +1,13 @@
-# 交接筆記 — 2026-07-26
+# 交接筆記 — 2026-07-26（末次更新 2026-07-29）
+
+> **7/28-29 增量**（詳見各 commit 與 SPEC）：
+> - 整理層 SPEC v2（`docs/SPEC-cleanup.md`）——v1 被外部對抗審查打 4/10 後全面改版，審查紀錄在 §9
+> - **Phase 0 已交付**：確定性改口剖析器（「3000 不對 5000」→「5000」；51+30 測試、外部語料 0 安全違規）、privacy_mode 三檔、整理總時限
+> - 免費 API 入口 ×8：local→nvidia→groq→cerebras→gemini→sambanova→openrouter→mistral（`docs/providers.md`）＋ `設定整理AI.bat`
+> - **背景模型升級**：出廠 base 起步，背景下載硬體值得的模型後熱切換（`auto_upgrade_model`）
+> - **CI 乾淨機驗證**（`verify-install` job）：另一台 runner 靜默安裝→啟動驗五項斷言→解除安裝。已在乾淨機實證五項全過。
+>   ⚠️ 教訓：找 uninstaller 不可 `-Recurse` 掃 Programs（會抓到別家軟體，懸掛 35 分鐘）
+> - Jason 機器上 **Ollama 已在跑**（port 11434），但 `qwen3:4b` 是否已 pull 未確認
 
 > 這份是給「下一個接手的人（含未來的 Claude session）」看的，不是給使用者看的。
 > 使用者看 [README.md](README.md)，要做什麼看 [ROADMAP.md](ROADMAP.md)，踩過的坑看 [references/pitfalls.md](references/pitfalls.md)。
