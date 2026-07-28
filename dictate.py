@@ -95,10 +95,17 @@ DEFAULT_CFG = {
     "diary_also_paste": False,
     # 第一層清理：本機規則、永遠跑、0 延遲、不用 API key。
     # fillers 留空＝用內建清單（只收幾乎不可能是實詞的語助詞）。
-    # structure：講「第一…第二…」時自動分行（只插換行、不改字）
-    "tidy": {"enabled": True, "structure": True, "fillers": []},
+    # structure：「第一…第二…」自動分行；correction：確定性改口處理（只留最後版本）
+    "tidy": {"enabled": True, "structure": True, "correction": True, "fillers": []},
     "polish": {
         "enabled": True,
+        # 隱私模式（SPEC-cleanup v2 §3.3）：
+        #   cloud_fallback_allowed（預設，現行行為）＝依序試整條 provider 鏈
+        #   cloud_primary ＝ 本機優先，雲端只試「第一家有 key 的」，失敗直接回規則層
+        #   local_only    ＝ 只用本機 provider，永不出網
+        "privacy_mode": "cloud_fallback_allowed",
+        # 整條整理流程的總時限（秒）——不是每家各等一次（瀑布延遲審查意見）
+        "total_deadline": 12,
         # 依「字會貼進哪個 app」自動換整理風格。key 對應面板顯示的 app 名稱
         # （見 APP_NAMES），"default" 是沒對到時用的。
         "app_styles": {
@@ -735,6 +742,84 @@ def _build_tidy():
 _TIDY = None
 
 
+# ── 改口剖析器（SPEC-cleanup v2 §2 / Phase 0）─────────────────────────────
+# 「改口只留最後版本」本質是刪除操作，不需要 LLM 自由改寫（審查結論）。
+# 設計哲學：**只處理有把握的型態，其餘一律不動**——改錯話比留著標記嚴重得多。
+#
+# 標記分兩級：
+#   強標記（幾乎只用於改口）：啊不對/阿不對/欸不對/喔不對/阿不是/啊不是/說錯了/講錯了/更正
+#   弱標記（「不對」「不是」也是一般用語）：必須前後都是邊界（標點/空白）才算,
+#     所以「這樣做不對」「不對稱」「對不對」「他不是故意的」都不會命中。
+_CORR_STRONG = r"啊不對|阿不對|欸不對|誒不對|喔不對|阿不是|啊不是|說錯了|講錯了|更正一下|更正"
+_CORR_WEAK = r"不對|我是說"
+_CORR_CONN = r"(?:是|應該是|改成|改為|改|變成)?"
+_CORR_RX = re.compile(
+    rf"(?:(?<=[，。！？、\s])|^)"                 # 左邊界
+    rf"(?:(?:{_CORR_STRONG})|(?:{_CORR_WEAK})(?=[，。\s]))"   # 弱標記右邊必須是邊界
+    rf"[，。\s]*{_CORR_CONN}[，。\s]*")
+_NUM_RX = re.compile(r"\d[\d,.]*")
+# 動詞錨點：改口通常重講一個完整片語，片語的起點多半緊接在這些動詞後面。
+# 由長到短比對；找不到錨點就不動（保守）。
+_CORR_ANCHORS = ["處理", "聯絡", "打給", "傳給", "改到", "約在", "就是",
+                 "幫", "跟", "找", "約", "給", "買", "傳", "發", "去", "到", "在", "是", "要"]
+
+
+def _apply_one_correction(text):
+    m = _CORR_RX.search(text)
+    if not m:
+        return None
+    a = text[:m.start()].rstrip("，。、 \t")
+    b = text[m.end():].lstrip("，。、 \t")
+    if not a or not b:
+        return None                      # 「我是說真的」這種句首標記 → 不動
+
+    # Case 1：數字改口。「維護費 3000，不對，改成 5000」→ 換掉 A 的最後一個數字
+    mb = _NUM_RX.match(b)
+    nums_a = list(_NUM_RX.finditer(a))
+    if mb and nums_a:
+        last = nums_a[-1]
+        a_tail = a[last.end():]
+        b_rest = b[mb.end():]
+        # 重講常常連單位一起講（「3 點 不對 4 點」）：B 的後續若以 A 的尾巴開頭，
+        # 表示單位被重講了 → 直接用 B 的版本，避免「4 點 點」
+        if a_tail.strip() and b_rest.lstrip("，。、 \t").startswith(a_tail.strip()):
+            return a[:last.start()] + b
+        return a[:last.start()] + mb.group() + a_tail + b_rest
+
+    # Case 2：片語改口（結尾對齊 + 動詞錨點）。
+    # 「明天要處理慶修點餐的維護費 啊不對 是常青的維護費（嗯然後…）」
+    # 不能用標點切 B 子句——ASR 常常整句沒標點。改成：拿 A 的結尾（由長到短）
+    # 去 B 的開頭附近找同樣的字串，找到＝重講的片語到那裡結束。
+    for L in range(min(len(a), 15), 1, -1):
+        s = a[-L:]
+        pos = b.find(s, 0, 20)            # 重講的片語一定在 B 開頭附近
+        if pos < 0:
+            continue
+        b_clause, b_rest = b[:pos + L], b[pos + L:]
+        cut = len(a) - L                  # 共同結尾在 A 的起點
+        best = -1
+        for an in _CORR_ANCHORS:
+            q = a.rfind(an, 0, cut)
+            if q >= 0:
+                best = max(best, q + len(an))
+        if 0 < best <= cut:
+            return a[:best] + b_clause + b_rest
+        break                             # 找到對齊但沒錨點 → 不動（不要試更短的結尾）
+    return None                           # 沒把握 → 整句不動，留給 LLM 層
+
+
+def correct_local(text):
+    """確定性改口處理。最多套三次（連續改口），任何一步沒把握就停。"""
+    if not CFG.get("tidy", {}).get("correction", True) or not text:
+        return text
+    for _ in range(3):
+        out = _apply_one_correction(text)
+        if out is None:
+            return text
+        text = out
+    return text
+
+
 # 「第一…第二…」自動分行。
 # ⚠️ 刻意只插入換行、**一個字都不改**——條列化很容易變成「幫你改寫」，
 #    而改寫就有可能改掉你的原意。只加換行的話最壞情況也只是排版醜，不會失真。
@@ -762,7 +847,9 @@ def tidy_local(text):
         return text
     if _TIDY is None:
         _TIDY = _build_tidy()
-    out = text
+    # 改口剖析必須在口頭禪清理**之前**跑——標記詞（啊不對）本身長得像口頭禪，
+    # 先清就找不到了
+    out = correct_local(text)
     for rx, rep in _TIDY:
         out = rx.sub(rep, out)
     out = structure_local(out).strip()
@@ -847,10 +934,23 @@ def polish(text, app=None):
     limit = int(len(text) * 1.5) + 40
     user_msg = f"<逐字稿>\n{text}\n</逐字稿>\n\n只輸出整理後的逐字稿本身。"
     cands = _candidates()
+    mode = p.get("privacy_mode", "cloud_fallback_allowed")
+    if mode == "local_only":
+        # 選了本機就永不出網——sidecar/ollama 掛了直接回規則層，
+        # 不能在使用者不知情下把逐字稿送上雲端（SPEC v2 §3.3）
+        cands = [c for c in cands if "localhost" in c[1] or "127.0.0.1" in c[1]]
+    elif mode == "cloud_primary":
+        loc = [c for c in cands if "localhost" in c[1] or "127.0.0.1" in c[1]]
+        cloud = [c for c in cands if c not in loc]
+        cands = loc + cloud[:1]           # 雲端只試第一家，守延遲預算
     if not cands:
         log("（沒有可用的 LLM provider → 只用本機清理。設定方式見 docs/providers.md）")
         return text
+    hard_deadline = time.monotonic() + float(p.get("total_deadline", 12))
     for i, (name, url, model, key) in enumerate(cands):
+        if time.monotonic() >= hard_deadline:
+            log("⚠ 整理總時限已到 → 改用本機清理結果")
+            break
         local = "localhost" in url or "127.0.0.1" in url
         try:
             r = requests.post(url,
@@ -859,7 +959,8 @@ def polish(text, app=None):
                                     "max_tokens": min(4000, len(text) * 3 + 200),
                                     "messages": [{"role": "system", "content": sys_msg},
                                                  {"role": "user", "content": user_msg}]},
-                              timeout=3 if local else p.get("timeout", 30))
+                              timeout=min(3 if local else p.get("timeout", 30),
+                                          max(1.0, hard_deadline - time.monotonic())))
             r.raise_for_status()
             out = r.json()["choices"][0]["message"]["content"].strip()
             if not out:

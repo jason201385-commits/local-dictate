@@ -61,6 +61,31 @@ check("句首序數不加前導換行", out2.replace("\n", ""), src2)
 check("單一序數不動 A", D.tidy_local("第一次用的時候覺得很難"), "第一次用的時候覺得很難")
 check("單一序數不動 B", D.tidy_local("這是第一版，我們之後會改"), "這是第一版，我們之後會改")
 
+print("\n[改口剖析] 該改的（SPEC-cleanup v2 §2）")
+check("數字改口（正典案例）",
+      D.correct_local("維護費 3000，不對，改成 5000"), "維護費 5000")
+check("數字改口（ASR 空格風）",
+      D.correct_local("維護費 3000 不對 是 5000"), "維護費 5000")
+check("片語改口（共同結尾+動詞錨點）",
+      D.correct_local("明天要處理慶修點餐的維護費 啊不對 是常青的維護費"),
+      "明天要處理常青的維護費")
+check("改口後面還有內容",
+      D.correct_local("約 3 點 不對 4 點 然後記得帶合約"),
+      "約 4 點 然後記得帶合約")
+check("連續兩次改口（ASR 無標點）",
+      D.correct_local("明天要處理慶修點餐的維護費 啊不對 是常青的維護費 然後 3 點 不對 4 點見"),
+      "明天要處理常青的維護費 然後 4 點見")
+
+print("\n[改口剖析] 絕不能被動到的（誤改比不改嚴重得多）")
+for s in ["這樣做不對", "不對稱的設計比較好看", "你說對不對",
+          "他不是故意的", "我是說真的", "改成這樣好嗎",
+          "等等我一下", "這個答案不對嗎"]:
+    check(f"不動：{s}", D.correct_local(s), s)
+
+print("\n[改口剖析] 沒把握就不動（寧可留標記給 LLM 層）")
+src = "那個東西 不對 我想想"          # 無數字、無共同結尾 → 不動
+check("無錨點不動", D.correct_local(src), src)
+
 print("\n[熱鍵] 每個預設值都要解析得出來")
 for name, combo in D.DEFAULT_CFG["hotkeys"].items():
     mods, vk = D.parse_hotkey(combo)
