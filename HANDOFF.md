@@ -13,7 +13,9 @@
 >   Run #7＝解除安裝器本身掛（13m46s），最可疑=[Code] MsgBox 在 runner 不被 SUPPRESSMSGBOXES 抑制
 >   → installer.iss 改 UninstallSilent 直接保留資料不問；workflow 改輪詢＋逾時吐屍檢
 > - **五項核心斷言已在乾淨 runner 連過兩輪**（#5、#7），只差解除安裝段閉環
-> - Run #8（含全部修正）結果：＿＿＿＿ ← 交接時填
+> - **Run #8（含全部修正）：✅ 全綠，5m 1s**（vs 之前 15min timeout）——
+>   安裝→啟動→五項斷言→解除安裝→清乾淨，完整閉環。MsgBox 確認就是懸掛元兇。
+>   **從此每個 release 自動跑這套。**（#5 殭屍 run 等 6h 自動 timeout，無害）
 > - ⚠️ 操作教訓：GitHub 未認證 API 60 次/小時，monitor 會被限流悶死→改爬 HTML；
 >   瀏覽器按 Cancel 前先確認在哪個 run 的頁面（#6 被誤殺）
 
