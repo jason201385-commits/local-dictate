@@ -260,9 +260,17 @@ python setup_shortcuts.py --remove       # 全部移除
 
 `local`（Ollama／LM Studio）→ `nvidia` → `groq` → `cerebras` → `gemini` → `sambanova` → `openrouter` → `mistral`
 
-- **最推薦本機 LLM**：沒有額度、沒有速率限制、文字也不出網，把最後一個隱私缺口補掉
-- 想用雲端的免費額度：**雙擊 `設定整理AI.bat`**，選一家、貼上 key 就好——不用編 JSON、不用開終端機。key 直接寫進 Windows 使用者環境變數，不會進任何檔案或 log
+- **最推薦本機 LLM**：沒有額度、沒有速率限制、文字也不出網，把最後一個隱私缺口補掉。**裝好 Ollama 就會自動被用到，不需要任何設定**——安裝檔版也一樣
 - **一家都沒設也不會壞**：第一層本機規則清理永遠會跑，只是比較陽春
+
+⚠️ **想接雲端的話，目前分兩種情況**：
+
+| 你怎麼安裝的 | 怎麼設 key |
+|---|---|
+| 從原始碼跑 | 雙擊 **`設定整理AI.bat`**，選一家、貼上 key，不用編 JSON |
+| 下載安裝檔 / portable | **目前沒有內建設定入口**（`setup_ai.py` 與批次檔還沒打包進去），要自己設 Windows 使用者環境變數，例如 `GROQ_API_KEY` |
+
+把設定工具打包進安裝檔是**待辦**，還沒做。在那之前，安裝版最省事的路是裝 Ollama 走本機。
 
 每一家怎麼申請、免費額度多少、哪個模型別用，全部寫在 [docs/providers.md](docs/providers.md)。
 
