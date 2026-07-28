@@ -1,6 +1,8 @@
 # SPEC：整理層（對標 Typeless）
 
-> 這份同時是 SDD（設計文件）與驗收規格。狀態：**草案 v1，2026-07-28**。
+> 這份同時是 SDD（設計文件）與驗收規格。狀態：**v2，2026-07-28**。
+> v1 經對抗式審查（外部獨立審查者，結論 4/10・拒絕進 Phase 1）後全面改版；
+> 審查抓到的核心矛盾與修正一覽見 §9 審查紀錄。
 > 讀者：要動 `polish()` / `tidy_local()` 相關程式碼的人。動手前先讀 `references/pitfalls.md` 第 3 條。
 
 ---
@@ -9,208 +11,180 @@
 
 **「整理」的 LLM 層對下載安裝檔的人來說目前不存在。**
 
-`_candidates()`（`dictate.py:804`）的每一條路都有前置條件：
+`_candidates()`（`dictate.py`）的每一條路都有前置條件：
 
 | provider | 前置條件 | 下載 exe 的一般使用者有嗎 |
 |---|---|---|
 | local（ollama） | 自己裝 Ollama + 拉模型 | ❌ |
-| nvidia / groq / cerebras / openrouter | 自己申請 key + 設環境變數 | ❌ |
+| 雲端七家（nvidia/groq/cerebras/gemini/sambanova/openrouter/mistral） | 自己申請 key + 設環境變數 | ❌ |
 
-兩者皆無 → `polish()` 直接回原文（`dictate.py:838-840`），只剩第一層規則清理。
-Typeless 的招牌體驗（改口只留最後版本、通順化、語意級標點）**出廠時是缺席的**。
+兩者皆無 → `polish()` 直接回原文，只剩第一層規則清理。
+Typeless 的招牌體驗（**改口只留最後版本**、通順化、語意級標點）出廠時缺席。
 
-這份 SPEC 的目標：**讓整理層在「不花錢、不註冊、不出網」的條件下出廠即可用**，並列出對標 Typeless 的其餘差距與取捨。
+### 目標的誠實版本（v2 修正）
+
+v1 寫「零設定、零出網、出廠即可用」——**自相矛盾**：模型要下載（出網一次）、要有人按下開啟（一次設定）。改為：
+
+> **一次明示下載之後，日常零設定；音訊與逐字稿永不出機。**
+
+遠期可另出「Full Offline 安裝包」（含整理模型）給完全離線環境，Lite 包維持現狀。
 
 ---
 
 ## 1. 對標 Typeless：差距總表
 
-Typeless 資料來源：官網與第三方評測（2026-07 查得）。我方狀態以 `dictate.py`（v0.1.2 後的 main）為準。
+（同 v1，狀態更新）
 
-| 能力 | Typeless | 我們 | 本 SPEC 的處置 |
+| 能力 | Typeless | 我們 | 處置 |
 |---|---|---|---|
-| 語音辨識 | 雲端（音訊上傳） | ✅ 本機 faster-whisper | 不動（這是存在理由） |
-| 費用／額度 | 免費 8,000 字/週，Pro $12-30/月 | ✅ 免費無上限 | 不動 |
-| 去口頭禪 | ✅ | 🟡 規則層有（`DEFAULT_FILLERS`，`dictate.py:701`），LLM 層多數人沒有 | **Phase 1 補齊** |
-| 改口只留最後版本 | ✅ | ❌ 出廠沒有（需 LLM，見 §0） | **Phase 1 核心交付** |
-| 智慧結構化（第一…第二…→條列） | ✅ | 🟡 規則版只插換行不改字（`structure_local`，`dictate.py:734`） | Phase 2 擴充規則；**刻意不用 LLM 做**（見 §6 不做清單） |
-| 依 app 調語氣 | ✅ | 🟡 `app_styles` v1（`dictate.py:104`），只作用於 LLM 層 | Phase 2：規則層也吃 app profile（如通訊軟體去末尾句號） |
-| 個人字典 | ✅ | ✅ `vocab.txt`（hotwords + 正規寫法表） | 不動 |
-| 學個人書寫風格 | ✅ | ❌ | Phase 2：剪貼簿 diff 字典（見 §5.4） |
-| 即時翻譯 | ✅ | ❌ | **不做**（scope 外，見 §6） |
-| 選字後語音改寫指令 | ✅ | ❌ | **不做**（見 §6） |
-| 手機鍵盤 | ✅ iOS/Android | ❌ | 遠期：PWA 掃碼無線麥克風（§5.5，不在本 SPEC 交付） |
-
-> ⚠️ 依存事實（2026-07-28 查證，見 memory）：**安裝檔是 CPU-only、出廠模型是 base**。
-> 整理層做得再好，ASR 第一印象差會整組被拖下水。該問題屬模型管理器（ROADMAP P1），不在本 SPEC，但驗收時的端到端體感要記得這個變因。
+| 語音辨識 | 雲端（音訊上傳） | ✅ 本機 | 不動 |
+| 費用／額度 | 8,000 字/週免費，$12-30/月 | ✅ 免費無上限 | 不動 |
+| 去口頭禪 | ✅ | 🟡 規則層有 | Phase 1 補 LLM 級 |
+| **改口只留最後版本** | ✅ | ❌ | **Phase 0 規則版（新）→ Phase 1 LLM 版** |
+| 智慧結構化 | ✅ | 🟡 只插換行 | Phase 2 擴充規則；不用 LLM |
+| 依 app 調語氣 | ✅ | 🟡 `app_styles` v1 | Phase 2 下放到規則層 |
+| 個人字典 | ✅ | ✅ `vocab.txt` | 不動 |
+| 學個人書寫風格 | ✅ | ❌ | Phase 2（剪貼簿 diff，預設關） |
+| 免費 API 入口 | —（它就是雲端服務） | ✅ **已做**：8 家 provider 鏈 + `設定整理AI.bat` | 已交付（2026-07-28） |
+| 翻譯／語音改寫指令／手機鍵盤 | ✅ | ❌ | 不做／不做／遠期 PWA |
 
 ---
 
-## 2. 目標與非目標
+## 2. 核心架構修正（v2）：改口處理不交給 LLM 自由改寫
 
-**目標**
-1. 下載 exe 的人**零設定、零費用、零出網**就能得到 LLM 級整理（改口、通順化、語意標點）。
-2. 小模型幻覺風險比雲端大模型高 → **防線全部程式端**，不靠 prompt 自律。
-3. 失敗永遠優雅降級：LLM 層任何失敗 → 回第一層規則結果，**絕不阻塞貼上**。
-4. 所有品質宣稱可用固定測試集重現，不出現無出處數字。
-
-**非目標**
-- 不做翻譯、不做語音改寫指令、不做手機原生鍵盤（理由見 §6）。
-- 不追求「整理品質贏過 Typeless 雲端大模型」——賣點是隱私與零成本下的「夠好」。
-- 不把 LLM 變成啟動前置條件：沒有它，聽寫功能 100% 可用。
-
----
-
-## 3. 現況架構（錨點）
+審查的關鍵洞見：**「改口只留最後版本」本質上是刪除操作**，不需要允許 0.6B 模型重寫整段文字。v2 把管線改成：
 
 ```
-錄音 → faster-whisper → canonicalize(vocab) → tidy_local()   ← 第一層：規則，永遠跑
-                                                  │            (dictate.py:746)
-                       ✨整理 開啟時 → polish(text, app)       ← 第二層：LLM，可選
-                                                  │            (dictate.py:825)
-                                          _candidates() 依序試  (dictate.py:804)
-                                                  │
-                              長度硬上限 1.5x+40 (dictate.py:835) ← pitfalls #3，不可移除
+ASR 文字
+  → ① 確定性改口剖析器（correction-span parser，規則）        ← Phase 0，新
+       偵測「不對/不是/我是說/改成/應該是/等等」等標記，
+       標出【撤回區】與【最後版本】，撤回區直接刪除
+  → ② tidy_local()（既有規則清理：口頭禪/重複字/標點/條列）
+  → ③（可選）LLM 層：兩種模式
+       edit-plan 模式（目標）：不可變 span 換成 sentinel，LLM 只回
+         delete/keep/標點 的編輯計畫，程式套回原文
+       rewrite 模式（過渡）：現行整段改寫，套 guard v2
+  → ④ guard v2 驗證（基準 = ①處理後的文字，不是原始 ASR）
 ```
 
-既有防線（保留，不重做）：
-- 長度膨脹丟棄（`dictate.py:855-858`）
-- `<逐字稿>` 標籤隔離 + 「你是整理器不是助理」system prompt（`POLISH_SYS`，`dictate.py:762`）
-- 啟動時 socket 探測本機 provider，死的整場跳過（`probe_local_providers`，`dictate.py:781`）
-- 全部失敗回規則層結果（`dictate.py:870-871`）
+### 2.1 Guard v2（修正 v1 的自相矛盾）
+
+v1 的錯：以**原始 ASR 文字**當基準抽 protected token → 被使用者自己撤回的「3000」也被保護 → 正確整理必被拒。
+
+v2 規則：
+- **基準是 ① 改口剖析之後的文字**。被撤回的數字/專名不在保護清單。
+- 保護清單：數字串、URL、Email、英文 token、`vocab.txt` 詞條、**否定與範圍詞**（不、不要、取消、最多、至少）。
+- **數值表面形式視為不可變**：「三千」→「3000」、「3,000」→「3000」、`7/28`→「7 月 28 日」都算違規（正規化屬確定性層的工作，不給 LLM 做）。中文數字也要進抽取器，否則「三千」根本沒被保護。
+- 除存在性外，驗證**次數與相對順序**（防「維護費 3000、訂金 5000」被調換、防重複數字被刪一個）。
+- 大小寫修正（iphone→iPhone）與全半形屬確定性 canonicalize 的工作（已存在），guard 對這類差異用 NFC ＋ casefold 後比對，不誤殺。
+- 任何違規 → 丟棄 LLM 結果、回 ② 的輸出，log 記 `guard_tripped`＋**違規類型與位置，不記實際值**（電話/金額不落地，見 §5 log 政策）。
+
+已知殘餘風險（誠實列出）：guard 擋不住「刪掉語意詞但不在保護清單」的改寫。這是 rewrite 模式的固有缺陷，也是要走 edit-plan 模式的理由。
 
 ---
 
-## 4. 設計：內嵌 llama.cpp sidecar（Phase 1 核心）
+## 3. Sidecar v2（llama-server）
 
-### 4.1 為什麼是 sidecar 而不是其他
+### 3.1 狀態機（v1 缺，8s/10s 矛盾由此解）
 
-| 方案 | 否決理由 |
+```
+STOPPED → STARTING → READY ⇄ BUSY
+                       ↓ (llama-server 內建 idle sleep)
+                     SLEEPING（程序在、模型已卸載）
+任何狀態 → STOPPING → STOPPED
+啟動失敗/崩潰 → BACKOFF（限次重啟、指數退避）→ DEAD（本場放棄）
+```
+
+- 單一 spawn lock；`ensure()` 併發呼叫只允許一個進 STARTING，其餘等或直接 fallback。
+- process generation ID：readiness 與請求都帶 generation，殺舊拉新時不會把舊程序的回應當新的。
+- `active_requests` 計數：STOPPING 前等 in-flight 清空。
+- 多開防護：主程式已有具名 mutex 單一實例鎖，sidecar 埠檔（`%LOCALAPPDATA%\local-dictate\sidecar.lock`）記 PID＋port＋generation。
+
+### 3.2 生命週期要點（採審查修正）
+
+- **spawn 順序**：`CreateProcess(CREATE_SUSPENDED)` → `AssignProcessToJobObject` → 成功才 `ResumeThread`，失敗立即 terminate。Job handle 不可繼承、由主程序單一持有。消除「assign 前父死→孤兒」的空窗。需測 Task Manager 強殺父程序、以及主程序已在外層 Job 的巢狀情境。
+- **閒置卸載不自己殺程序**：用 llama-server 的 `--sleep-idle-seconds`（程序常駐、模型與 KV cache 卸載、新請求自動重載；`/health` 不會喚醒）。Job Object 只負責「主程序死亡時的最終清理」。（⚠️ 此參數引自 llama-server 官方 README，**版本相容性實作時要驗**。）
+- **timeout 要能終止生成**，不是只放棄等待：`--parallel 1`、`max_tokens` 硬上限、總請求 deadline（不是每家各等一次）；timeout 後驗證 HTTP disconnect 是否釋放 slot，不能釋放就整個 sidecar 重啟（走 BACKOFF）。
+- **埠與歸屬**：不預找空埠（TOCTOU），直接讓 server bind、失敗換埠重試；readiness = child PID 存活 ＋ **帶 API key 打 `/v1/models` 驗回 alias**（`/health` 是公開端點不驗 key，200 不代表那是自己的 server）。啟動帶唯一 `--alias`。
+- **安全參數**：`--api-key-file`（**不用 `--api-key <值>`**——值會出現在命令列，跟 dispatch 的教訓同一顆雷）、`--no-ui`、`--offline`、`--log-disable`（或有上限的去識別 stderr ring buffer）。stdout/stderr 若接 PIPE 必須持續 drain，否則塞滿會讓 child 卡死。
+- **模型執行設定全部釘死**（否則延遲與輸出不可重現）：llama.cpp binary SHA、GGUF revision SHA、chat template、`enable_thinking=false`（Qwen3 預設可能開 thinking）、sampling 參數與 seed、context/threads/batch/parallel/max_tokens、prompt 版本。
+
+### 3.3 隱私模式（v1 重大遺漏）
+
+v1 的 fallback 鏈會讓「選了本機 AI」的使用者在 sidecar 崩潰時**不知情地把逐字稿送上雲端**。v2 新增 `polish.privacy_mode`：
+
+| 模式 | 行為 |
 |---|---|
-| 要求使用者裝 Ollama | 另一個背景程式與更新週期；解除安裝與支援責任變複雜（ROADMAP「明確不做」已列） |
-| `llama-cpp-python` 進主程序 | 原生 DLL 打包更難；LLM crash 直接拖垮聽寫工具 |
-| 雲端免費層當預設 | 要 key、要註冊、文字出網——三個都違反 §2 目標 1 |
+| `local_only` | embedded/ollama 失敗 → 直接規則層，**永不出網**。選「本機 AI」時預設此值 |
+| `cloud_primary` | 使用者指定一家雲端為主力；失敗 → 規則層（**不**瀑布式試完全部——每句最多一次雲端嘗試，守延遲預算） |
+| `cloud_fallback_allowed` | 明示同意後才允許跨 provider 備援（現行行為，維持給已理解的使用者） |
 
-採 **`llama-server.exe`（llama.cpp 官方 CPU build，MIT）** 子程序：
-- 只監聽 `127.0.0.1`、埠號啟動時隨機挑可用埠
-- 以 `--api-key <隨機值>` 啟動（llama-server 支援；版本差異**待驗證**），防本機其他程式蹭用
-- OpenAI 相容 `/v1/chat/completions` → **完全重用現有 `polish()`**，只是 `_candidates()` 在最前面動態插入一筆 `embedded`
-
-### 4.2 生命週期（新模組 `sidecar.py`）
-
-```
-enable（使用者在 設定整理AI.bat 選「1. 本機 AI」且無 ollama）
-  └→ 下載模型（§4.3 的下載器規格）
-啟動引擎時：
-  sidecar.ensure()：
-    模型檔在？ → spawn llama-server（隱藏視窗、CREATE_NO_WINDOW）
-    → 健康檢查 /health，10 秒內沒 ready → 標記 dead（同 _DEAD_PROVIDERS 機制），本場不再試
-執行中：
-    crash（process exit）→ 偵測到 → 本場標 dead → polish 自動走下一個 provider
-    閒置 > idle_unload_min（預設 10 分鐘）→ 送 SIGTERM 卸載釋放 RAM
-    卸載後再被呼叫 → 重新 spawn（冷啟動秒數計入 §4.5 逾時預算；面板顯示「整理引擎喚醒中」）
-關閉引擎：
-    atexit + 面板 ✕ → terminate 子程序（不留孤兒；用 Job Object 綁定，父死子死——Windows 上
-    單靠 atexit 擋不住強殺，**必須** CreateJobObject + JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE）
-```
-
-### 4.3 模型與下載
-
-- 候選：`Qwen3-0.6B-GGUF Q8_0`（約 639MB，Apache 2.0）；RAM 充裕機器可選 `Qwen3-1.7B Q8_0`（約 1.83GB）。**兩者的繁中逐字稿整理品質都未驗證**——由 §4.6 品質閘決定能不能出廠，不由模型介紹決定。
-- **不進安裝檔**：安裝檔只帶 `llama-server.exe` + DLL（體積**待驗證**，預估數十 MB 級）。模型在使用者**明確開啟**「本機智慧整理」時才下載。
-- 下載器規格沿用 ROADMAP 模型管理器那套，一條都不能少：
-  - 面板明講「⬇ 下載整理模型（約 639MB）」——**不准默默下載**（pitfalls：v0.1.0 首啟事故）
-  - `.part` → SHA256 驗證 → atomic rename
-  - 可取消；失敗不影響聽寫
-- 授權：llama.cpp MIT、Qwen3 Apache 2.0，皆可再散布；但因為模型走下載不走打包，只有 `llama-server.exe` 需要隨附授權聲明。
-
-### 4.4 程式端防線（適用所有 provider，不只 sidecar）
-
-現有兩道（長度上限、標籤隔離）之上，新增第三道：
-
-**Protected-token guard**（Phase 0，今天就能做，不等 sidecar）：
-```
-整理前抽取：數字串（金額/日期/電話）、URL、Email、英文 token、vocab.txt 詞條
-整理後檢查：上述每一項必須原樣出現在輸出裡
-任一項消失或被改 → 丟棄 LLM 結果，回第一層規則結果，log 記 guard_tripped 與是哪一項
-```
-理由：0.6B 小模型改寫數字/專名的機率遠高於 120B；「維護費 3000」變「維護費 30000」比留著口頭禪嚴重一萬倍。這條跟長度上限一樣是**程式擋、不是 prompt 擋**。
-
-**原文可取回**（Phase 0）：`STATE["last_raw"]` 保存整理前文字；面板 `📋` 右鍵 = 複製未整理原文。guard 誤殺或 LLM 改壞時，使用者一鍵拿回原話，不用重講。
-
-### 4.5 延遲預算
-
-| 段 | 預算 | 超過時 |
-|---|---|---|
-| sidecar 整理（模型已載） | p50 ≤ 2.5s／句（門檻值，依 §4.6 實測調整，**非宣稱**） | 逾時 → 貼規則層結果 |
-| 冷啟動（idle 卸載後喚醒） | ≤ 8s，面板顯示狀態 | 逾時 → 本次貼規則層結果，背景繼續載 |
-
-現有 `timeout=3 if local`（`dictate.py:850`）對 sidecar 太緊，改為 per-provider timeout 欄位。
-
-### 4.6 品質閘（不過就不出廠）
-
-建 `tests/cleanup_eval.jsonl`：30-50 句台灣口語逐字稿（含改口、口頭禪、金額、人名、URL、LINE 短句、長段落）。每句附**不變量**而非標準答案：
-- 保護 token 全數保留
-- 長度比 ∈ [0.5, 1.5]
-- 指定口頭禪已移除
-- 不得出現原文沒有的資訊性 token（新數字、新專名）
-
-跑法：`python tests/run_cleanup_eval.py --provider embedded`（本機手動跑；**CI 跑不了**——runner 沒模型，CI 只驗 guard 與規則層邏輯）。
-**出廠條件**：Qwen3-0.6B 在測試集上 guard 觸發率 < 10%、不變量全過率 ≥ 90%、p50 延遲達 §4.5——三項有一項不到，`embedded` 不設為預設，退回「設定裡的進階選項」。門檻數字是初值，跑完第一輪實測後修訂並記錄在本檔。
+`設定整理AI.bat` 選「本機 AI」時寫入 `local_only`；選雲端家時寫入 `cloud_primary`。現行預設（Jason 型使用者）維持 `cloud_fallback_allowed` 相容。
 
 ---
 
-## 5. 其餘 Typeless 差距的設計摘要
+## 4. 品質閘 v2（先於 Phase 1 出貨，不是 Phase 2）
 
-### 5.1（Phase 2）規則層 app profile
-`app_styles` 目前只影響 LLM prompt。把 app 感知下放到規則層：通訊軟體（LINE/Discord）去末尾句號、文件類（Word）全形標點強制。零延遲、無模型也享受得到。
+v1 的閘可以被「原文照抄」滿分通過——不變量全過≠有整理。v2 拆五組指標：
 
-### 5.2（Phase 2）結構化擴充
-維持「只插換行不改字」鐵則，擴充觸發樣式（「首先/再來/最後」「一、二、三」）。**不用 LLM 做結構化**：會跟長度硬上限衝突（1998 字規格書事故的根），這在上一輪已拍板。
-
-### 5.3（Phase 2）測試集進 CI
-`cleanup_eval.jsonl` 的規則層不變量（不需模型的部分）進 `tests/test_pure.py`，防規則回歸。
-
-### 5.4（Phase 2）個人風格：剪貼簿 diff 字典
-使用者手動改完貼出的字後，用 `difflib` 比對「我們的輸出 vs 他改完的版本」，把穩定重現的替換（出現 ≥3 次）寫入 `user_style.json`，規則層套用。
-⚠️ 隱私邊界：這等於長期記錄使用者的修改行為，**預設關閉**，開啟時面板明示。檔案進 `.gitignore`。
-
-### 5.5（遠期，不在本 SPEC）PWA 手機麥克風
-內建 HTTP server + QR code，手機掃碼當無線麥克風，音訊回電腦辨識。解「手機端」差距的零成本路徑，等桌面端穩定再議。
-
----
-
-## 6. 明確不做（及理由）
-
-| 項目 | 理由 |
+| 指標 | 門檻 |
 |---|---|
-| 翻譯 | 與「整理器不是助理」的安全模型衝突（翻譯必然大幅改寫，長度/token guard 全失效）；且非目標受眾的主訴求 |
-| 語音改寫指令（選字後說「改短一點」） | 同上，指令模式打開就是 prompt injection 的正門；Typeless 為此付出的安全代價我們不付 |
-| LLM 結構化 | 與長度硬上限衝突，已拍板 |
-| 把 sidecar 換成常駐大模型 | RAM 常駐成本 + 目標機器是無 GPU 筆電 |
-| 雲端帳號體系/同步 | 存在理由是本機 |
+| 安全不變量（保護 token/否定詞/長度） | 被接受的輸出 **100%** 通過（determinstic，不是 90%） |
+| **核心任務成功率**：撤回區確實刪除、最後版本保留 | ≥90%（初值，修訂要留紀錄，不做移動球門） |
+| guard 誤殺率（正常整理被拒） | 明確量測並回報，含 FP/FN |
+| fallback／timeout 率 | 明確量測並回報 |
+| 人工盲評（語意保真/流暢/過度刪除） | 抽樣，出貨前至少一輪 |
+
+- 測試集：主集 30-50 句＋**holdout**（不用於調 prompt）；涵蓋改口、口頭禪、金額、人名、URL、否定詞、LINE 短句、長段落。
+- 延遲報 warm/cold 各 p50/p95、timeout 率、峰值 RAM、**ASR＋LLM 同時運作**時的延遲；標明最低支援硬體，不只 22 核開發機。
+- **CI 不需要真模型也能測生命週期**：fake `llama-server.exe` 驗父強殺/重複 ensure/埠衝突/請求中 idle/timeout 殘留/crash-backoff/Job 繼承/下載取消/磁碟滿/hash 錯——全部進自動化。真模型品質跑 release gate（本機手動）。
 
 ---
 
-## 7. 交付切分
+## 5. Log 政策（配合 guard）
 
-| Phase | 內容 | 前置 | 驗收 |
-|---|---|---|---|
-| **0**（不等 sidecar，先做） | Protected-token guard、`last_raw` + 📋 右鍵取原文、per-provider timeout | 無 | guard 單元測試進 CI；現有 nvidia provider 實測 guard 不誤殺正常整理 |
-| **1** | `sidecar.py`（生命週期含 Job Object）、下載器、`_candidates()` 插入 embedded、設定整理AI.bat 加「下載本機整理模型」選項 | Phase 0 | 乾淨機器（無 ollama、無 key）：開啟後整理生效、關閉引擎無孤兒程序、模型下載可取消 |
-| **2** | `cleanup_eval.jsonl` + 品質閘跑第一輪、規則層 app profile、結構化擴充、風格字典（預設關） | Phase 1 | 品質閘三指標記錄在本檔；§4.6 決定 embedded 是否預設開啟 |
-
-**Phase 1 完成前，`embedded` 不寫進 README 的功能清單**——沒到手的東西不宣傳（Hard Constraint #17）。
+`dictate.log` 既有原則不變（只記前 40 字）。guard 相關新增：**不記實際的電話/金額/URL 值**，只記類型、位置、不可逆摘要。
 
 ---
 
-## 8. 風險與待驗證
+## 6. 免費 API 入口（已交付，2026-07-28）
 
-| # | 項目 | 狀態 |
+provider 鏈現況：`local → nvidia → groq → cerebras → gemini → sambanova → openrouter → mistral`＋`設定整理AI.bat` 互動選單。額度數字與待驗證標註見 `docs/providers.md`。
+
+審查意見的採納狀態：
+- ✅ Gemini 值得加（flash-lite；免費層內容可能被 Google 用於改善產品——已屬「文字出網」的既有告知範圍）
+- ✅ SambaNova 官方表列多數模型 20 RPD → 已在文件標示、放鏈的後段。**保留在鏈中是使用者決策**（免綁卡、沒 key 就跳過零成本）
+- ⏸ Cloudflare Workers AI：OpenAI 相容端點存在但要 account_id＋scoped token，設定摩擦高於受眾承受度，暫不加，記錄於此
+- ✅ 瀑布延遲問題 → 併入 §3.3 privacy_mode（cloud_primary 每句最多一次雲端嘗試）
+
+---
+
+## 7. 明確不做（v1 不變）
+
+翻譯、語音改寫指令、LLM 結構化、強制 Ollama、雲端帳號體系。理由同 v1。
+
+---
+
+## 8. 交付切分（v2 重排）
+
+| Phase | 內容 | 驗收 |
 |---|---|---|
-| 1 | Qwen3-0.6B 繁中整理品質 | **未驗證**，品質閘決定 |
-| 2 | 無 GPU 筆電上 0.6B 的實際延遲 | **未驗證**（本機 22 核不代表目標機器） |
-| 3 | `llama-server --api-key` 參數的版本相容性 | **待驗證** |
-| 4 | llama-server.exe + DLL 的打包體積與 PyInstaller 相容性 | **待驗證** |
-| 5 | 防毒對「安裝檔內含會開本機 server 的 exe」的反應 | **待驗證**（README 防毒預告段落需同步更新） |
-| 6 | Job Object 綁定在 per-user 權限下的行為 | **待驗證** |
+| **0**（純規則，立即有使用者價值） | ① 確定性改口剖析器（「不對/我是說/改成…」撤回刪除）② guard v2 骨架（以剖析後文字為基準；含中文數字抽取、次序驗證）③ `privacy_mode` 設定與 `polish()` 總 deadline | 剖析器測試案例進 CI（含「維護費 3000 不對 5000」）；guard FP 率在現有 nvidia provider 實測 |
+| **1** | sidecar v2（狀態機＋suspended-spawn Job＋sleep-idle＋authed readiness）；fake-server 生命週期 CI；**品質閘跑完才出貨**；先 rewrite 模式＋guard v2 | §4 五指標達標；乾淨機器無 key 無 ollama 可用；父強殺無孤兒 |
+| **2** | edit-plan 模式取代 rewrite；風格字典（預設關）；規則層 app profile；結構化擴充 | edit-plan 在 holdout 上核心任務成功率 ≥ rewrite 模式 |
+
+**Phase 1 完成前，embedded 不寫進 README 功能清單**（Hard Constraint #17）。
+
+---
+
+## 9. 審查紀錄（audit trail）
+
+- **2026-07-28**：v1 由外部獨立審查者做對抗式審查，結論 **4/10・拒絕進 Phase 1**。
+  成立且已採納：guard 與改口功能互斥（→§2）、Job assign 空窗（→§3.2）、無狀態機（→§3.1）、
+  自殺式 idle unload（→sleep-idle）、timeout 不終止生成、埠 TOCTOU＋`/health` 不驗 key、
+  8s/10s 矛盾、`--api-key` 上命令列、Qwen3 thinking 未釘死、**privacy fallback 漏洞**（→§3.3）、
+  品質閘可被照抄通過（→§4）、瀑布延遲。
+  未採納：移除 SambaNova（使用者明示保留，文件已標限額）；`gemini-2.5-flash-lite` 命名
+  （審查者引的是舊文件；本機 AI Studio 頁 2026-07-27 實測為 3.1 系列）。
+- 待驗證清單：`--sleep-idle-seconds`/`--api-key-file`/`--offline` 的版本相容性、
+  Qwen3-0.6B 繁中品質、無 GPU 筆電延遲、llama-server 打包體積、防毒反應、巢狀 Job 行為。
