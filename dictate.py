@@ -60,6 +60,9 @@ DEFAULT_CFG = {
     # 不要用 medium+beam1：實測會把英文品牌名聽成別的字，省 0.25s 不划算。
     "model": "medium",
     "beam_size": 5,
+    # 出廠模型（base）只是起點：背景自動下載這台硬體值得的模型並在空檔切換。
+    # 不想要（省流量/磁碟）就設 false。
+    "auto_upgrade_model": True,
     "language": "zh",
     "to_traditional": True,
     "samplerate": 16000,
@@ -173,6 +176,17 @@ def available_models():
     return found
 
 
+def _hw_recommend(gpu_ok=None, cores=None):
+    """這台硬體「值得」跑的模型。獨立成純函式方便測試。"""
+    if gpu_ok is None:
+        lib = os.path.join(os.path.dirname(os.__file__), "site-packages", "nvidia")
+        gpu_ok = bool(glob.glob(os.path.join(lib, "*", "bin")))
+    cores = cores or os.cpu_count() or 4
+    if gpu_ok:
+        return "medium", 5
+    return ("small", 5) if cores >= 8 else ("base", 1)
+
+
 def _first_run_model():
     """第一次產生設定檔時挑一個預設模型。
 
@@ -181,13 +195,9 @@ def _first_run_model():
       2. **手上已經有這個模型**（不然第一次啟動要默默下載幾百 MB，
          而使用者只會看到面板卡在「載入中」——2026-07-26 實裝測試踩到）
     所以先算推薦值，再跟「已下載清單」取交集；沒有交集才真的去下載推薦值。
+    退而求其次的部分由背景升級補（_start_model_upgrade）。
     """
-    lib = os.path.join(os.path.dirname(os.__file__), "site-packages", "nvidia")
-    if glob.glob(os.path.join(lib, "*", "bin")):
-        rec, beam = "medium", 5
-    else:
-        rec, beam = ("small", 5) if (os.cpu_count() or 4) >= 8 else ("base", 1)
-
+    rec, beam = _hw_recommend()
     have = available_models()
     if rec in have or not have:
         return rec, beam
@@ -408,6 +418,72 @@ class Engine:
 
 
 ENGINE = Engine()
+
+# ── 背景模型升級 ────────────────────────────────────────────────────────
+# 安裝檔只內建 base（141MB，換取「第一次啟動零下載」），但 base 的辨識明顯
+# 較差——不能讓下載者的第一印象停在「好爛」。解法：先用 base 開始工作，
+# 背景下載這台硬體值得的模型，下載完在「沒有工作的空檔」熱切換。
+_UPGRADE = {"target": None, "beam": 5, "ready": False}
+
+
+def _upgrade_target():
+    """要不要升級、升到哪。回 None 表示不用。"""
+    if not CFG.get("auto_upgrade_model", True):
+        return None
+    rec, beam = _hw_recommend()
+    cur = CFG["model"]
+    if cur not in LADDER or rec not in LADDER:
+        return None
+    if LADDER.index(cur) >= LADDER.index(rec):
+        return None                       # 現在的已經 ≥ 推薦值
+    return rec, beam
+
+
+def _start_model_upgrade():
+    t = _upgrade_target()
+    if not t:
+        return
+    rec, beam = t
+
+    def dl():
+        try:
+            from faster_whisper.utils import download_model
+            mb = {"small": 464, "medium": 1779}.get(rec, "")
+            log(f"⬇ 背景下載更準的模型 {rec}（約 {mb} MB）…下載完會自動切換，"
+                "期間照常可用")
+            download_model(rec, cache_dir=(str(MODELS_DIR) if FROZEN else None))
+            _UPGRADE.update(target=rec, beam=beam, ready=True)
+            log(f"✓ {rec} 下載完成，等空檔切換")
+        except Exception as e:
+            log(f"（背景升級失敗，維持 {CFG['model']}：{str(e)[:80]}）")
+
+    threading.Thread(target=dl, daemon=True, name="model-upgrade").start()
+
+
+def _maybe_swap_model():
+    """在 worker 的空檔執行（worker 是唯一呼叫 transcribe 的執行緒，
+    所以在這裡換模型不會跟轉寫互撞）。錄音中也安全——那筆工作會排隊等換完。"""
+    if not _UPGRADE["ready"]:
+        return
+    rec, beam = _UPGRADE["target"], _UPGRADE["beam"]
+    _UPGRADE["ready"] = False
+    try:
+        old = CFG["model"]
+        CFG["model"], CFG["beam_size"] = rec, beam
+        ENGINE.model = None
+        ENGINE.load()
+        # 寫回設定檔（保留使用者其他設定；容忍 BOM）
+        try:
+            j = json.loads(CFG_PATH.read_text(encoding="utf-8-sig"))
+            j["model"], j["beam_size"] = rec, beam
+            CFG_PATH.write_text(json.dumps(j, ensure_ascii=False, indent=2),
+                                encoding="utf-8")
+        except Exception:
+            pass
+        log(f"✓ 模型已升級 {old} → {rec}")
+        ui("done", f"辨識模型已升級為 {rec}")
+    except Exception as e:
+        log(f"⚠ 模型切換失敗，退回 {CFG['model']}：{str(e)[:80]}")
 
 
 # ── 錄音 ────────────────────────────────────────────────────────────────
@@ -1371,6 +1447,8 @@ def _work_one():
         try:
             mode, audio, target = JOBS.get(timeout=0.3)
         except queue.Empty:
+            if STATE.get("mode") is None:      # 沒在錄音的空檔才換模型
+                _maybe_swap_model()
             continue
         if audio.size < SR * 0.3:
             log("✗ 太短（不到 0.3 秒）— 是不是連點兩下？")
@@ -1553,6 +1631,7 @@ def _start_backend():
         return
     REC.open()          # 麥克風常開，不要每次錄音才開（開開關關會拿到靜音串流）
     probe_local_providers()   # 先探測，別讓第一次口述付連線逾時的錢
+    _start_model_upgrade()    # 出廠 base 只是起點：背景升到這台硬體值得的模型
     threading.Thread(target=worker, daemon=True).start()
 
     def _quit():

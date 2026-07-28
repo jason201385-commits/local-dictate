@@ -110,6 +110,18 @@ check("Claude Code",
       "Claude Code")
 check("未知的走 fallback", D._app_label(r"C:\x\weird.exe", "weird"), "weird")
 
+print("\n[背景模型升級] 硬體推薦與升級判斷")
+check("GPU → medium", D._hw_recommend(gpu_ok=True, cores=4), ("medium", 5))
+check("CPU 8 核 → small", D._hw_recommend(gpu_ok=False, cores=8), ("small", 5))
+check("CPU 4 核 → base+beam1", D._hw_recommend(gpu_ok=False, cores=4), ("base", 1))
+_orig_model, _orig_flag = D.CFG["model"], D.CFG.get("auto_upgrade_model", True)
+D.CFG["auto_upgrade_model"] = False
+check_true("關閉開關就不升級", D._upgrade_target() is None)
+D.CFG["auto_upgrade_model"] = True
+D.CFG["model"] = "large-v3"
+check_true("已經 ≥ 推薦值就不升級", D._upgrade_target() is None)
+D.CFG["model"], D.CFG["auto_upgrade_model"] = _orig_model, _orig_flag
+
 print("\n[設定] 預設值健全性")
 check_true("polish 有 providers", bool(D.DEFAULT_CFG["polish"].get("providers")))
 check_true("tidy 預設開啟", D.DEFAULT_CFG["tidy"]["enabled"] is True)

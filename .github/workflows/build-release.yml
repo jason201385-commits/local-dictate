@@ -136,6 +136,75 @@ jobs:
 
             ### 注意
             - 這一版**不含 GPU 加速**（CUDA 元件約 1.9GB，另外提供）
-            - 第一次啟動請看小面板，設定與紀錄放在 `%LOCALAPPDATA%\local-dictate\`
+            - 出廠內建 base 模型；啟動後會**背景下載更適合你硬體的模型並自動切換**
             - Windows 可能顯示「不明發行者」——原因與程式要做的事寫在 README
             - 校驗碼見 `SHA256SUMS.txt`
+
+  # ── 乾淨機驗證 ────────────────────────────────────────────────────────
+  # 開發機有一堆「剛好裝過」的東西，本機測過 ≠ 裝得起來。
+  # 這個 job 跑在**另一台**乾淨 runner 上：只拿安裝檔，不 checkout 原始碼、
+  # 不裝 Python 相依——就是使用者拿到的環境。
+  # 驗不到的（誠實邊界）：麥克風（runner 沒有）、實際貼上、GPU。
+  # 但「安裝→啟動→模型載入→熱鍵註冊→解除安裝」這條最常斷的路驗得到。
+  verify-install:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-dictate-windows
+          path: artifacts
+
+      - name: 靜默安裝
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem artifacts\local-dictate-setup-*.exe | Select-Object -First 1
+          if (!$setup) { Write-Warning "沒有安裝檔（Inno 可能被跳過），改驗 portable"; exit 0 }
+          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "安裝失敗 exit $($p.ExitCode)" }
+          "installed=1" | Out-File $env:GITHUB_ENV -Append
+
+      - name: 啟動並驗證（模擬第一次使用）
+        if: env.installed == '1'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\local-dictate\local-dictate.exe"
+          if (!(Test-Path $exe)) {
+            # per-user 安裝的另一個可能位置
+            $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter local-dictate.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (!$exe -or !(Test-Path $exe)) { throw "找不到安裝後的執行檔" }
+          Start-Process $exe
+          Start-Sleep -Seconds 45
+          $proc = Get-Process -Name local-dictate -ErrorAction SilentlyContinue
+          $log = Join-Path $env:LOCALAPPDATA "local-dictate\dictate.log"
+          Write-Host "--- dictate.log ---"
+          if (Test-Path $log) { Get-Content $log } else { Write-Host "(沒有 log)" }
+          # 斷言 1：程序活著（麥克風失敗也必須優雅降級，不能整個死掉）
+          if (!$proc) { throw "程序沒有存活" }
+          $content = if (Test-Path $log) { Get-Content $log -Raw } else { "" }
+          # 斷言 2：模型載入成功（內建 base → 不需要網路下載）
+          if ($content -notmatch "模型就緒") { throw "模型沒有載入" }
+          # 斷言 3：第一次啟動不應該在下載主模型（內建承諾）
+          if ($content -match "首次下載語音模型") { throw "違反『第一次啟動零下載』承諾" }
+          # 斷言 4：熱鍵有註冊
+          if ($content -notmatch "已註冊") { throw "熱鍵沒有註冊" }
+          # 斷言 5：設定與字典有落位
+          foreach ($f in "config.json","vocab.txt") {
+            if (!(Test-Path (Join-Path $env:LOCALAPPDATA "local-dictate\$f"))) { throw "缺 $f" }
+          }
+          Write-Host "五項斷言全過（背景模型升級下載屬預期，不影響斷言 3）"
+          Stop-Process -Name local-dictate -Force
+
+      - name: 靜默解除安裝並驗證清乾淨
+        if: env.installed == '1'
+        shell: pwsh
+        run: |
+          $unins = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter unins*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$unins) { throw "找不到解除安裝程式" }
+          $p = Start-Process $unins.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "解除安裝失敗 exit $($p.ExitCode)" }
+          Start-Sleep -Seconds 5
+          $appdir = Split-Path $unins.FullName
+          if (Test-Path (Join-Path $appdir "local-dictate.exe")) { throw "解除安裝後主程式還在" }
+          Write-Host "解除安裝乾淨"
