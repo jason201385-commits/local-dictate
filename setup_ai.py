@@ -20,14 +20,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 PROVIDERS = [
+    ("gemini", "Google Gemini", "GEMINI_API_KEY", "https://aistudio.google.com/apikey",
+     "只要 Google 帳號，申請最簡單。免費層 flash-lite 500 次/天（2026-07 實測）"),
     ("nvidia", "NVIDIA NIM", "NVIDIA_API_KEY", "https://build.nvidia.com/",
      "有免費額度，本專案預設。實測整理一句約 1.7-2.6 秒"),
     ("groq", "Groq", "GROQ_API_KEY", "https://console.groq.com/keys",
      "免費層速度最快的一批（2026-07 查得約 30 次/分）"),
     ("cerebras", "Cerebras", "CEREBRAS_API_KEY", "https://cloud.cerebras.ai/",
      "免費日額度最寬鬆（2026-07 查得約 100 萬 token/天）"),
+    ("sambanova", "SambaNova", "SAMBANOVA_API_KEY", "https://cloud.sambanova.ai/",
+     "免綁卡。⚠️ 各模型限額差異大（部分僅 20 次/天，以官網為準）"),
     ("openrouter", "OpenRouter", "OPENROUTER_API_KEY", "https://openrouter.ai/keys",
      "一把金鑰通到約 30 個免費模型"),
+    ("mistral", "Mistral", "MISTRAL_API_KEY", "https://console.mistral.ai/",
+     "額度最寬（查得約 10 億 token/月）。⚠️ 註冊要手機簡訊驗證"),
 ]
 
 
