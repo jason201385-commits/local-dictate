@@ -121,8 +121,20 @@ DEFAULT_CFG = {
              "model": "llama-3.3-70b-versatile", "key_env": "GROQ_API_KEY"},
             {"name": "cerebras", "url": "https://api.cerebras.ai/v1/chat/completions",
              "model": "llama3.3-70b", "key_env": "CEREBRAS_API_KEY"},
+            # Google 帳號人人有 → 對一般使用者摩擦最低的一家。
+            # flash-lite 免費層 500 RPD / 15 RPM（2026-07-27 實測讀自 AI Studio
+            # rate-limit 頁）；好一點的 Flash 只有 20 RPD，口述場景幾次就沒了，別用。
+            {"name": "gemini",
+             "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+             "model": "gemini-3.1-flash-lite", "key_env": "GEMINI_API_KEY"},
+            # 免費層存在且免綁卡，但各模型限額差異大（部分模型僅 20 RPD，待驗證）
+            {"name": "sambanova", "url": "https://api.sambanova.ai/v1/chat/completions",
+             "model": "Meta-Llama-3.3-70B-Instruct", "key_env": "SAMBANOVA_API_KEY"},
             {"name": "openrouter", "url": "https://openrouter.ai/api/v1/chat/completions",
              "model": "meta-llama/llama-3.3-70b-instruct:free", "key_env": "OPENROUTER_API_KEY"},
+            # 額度最寬（約 1B token/月、~1 req/s，查得待驗證）但註冊要手機驗證
+            {"name": "mistral", "url": "https://api.mistral.ai/v1/chat/completions",
+             "model": "mistral-small-latest", "key_env": "MISTRAL_API_KEY"},
         ],
         "timeout": 30,
         "_note": "潤稿只把『已轉好的文字』送雲端，不送音訊、不送螢幕內容。要 100% 離線設 false。",

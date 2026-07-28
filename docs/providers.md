@@ -43,13 +43,15 @@ whisper 的 `medium` 模型大約佔 1GB VRAM，所以 6GB 的卡還有約 5GB �
 
 | 供應商 | 免費額度（2026-07 查得） | 需要 | 備註 |
 |---|---|---|---|
+| **Google Gemini** | **flash-lite 500 RPD／15 RPM**（實測讀自 AI Studio rate-limit 頁） | `GEMINI_API_KEY` | **申請摩擦最低**——只要 Google 帳號。走官方 OpenAI 相容端點（`…/v1beta/openai`）。⚠️ 別用 Flash：免費層只有 20 RPD，口述幾次就沒了 |
 | **NVIDIA NIM** | 有免費額度 | `NVIDIA_API_KEY` | **本專案預設**。實測 `openai/gpt-oss-120b` 約 1.7–2.6 秒 |
 | **Groq** | 約 30 RPM／1,000 RPD | `GROQ_API_KEY` | 自研 LPU，速度是免費層裡最快的一批 |
 | **Cerebras** | 約 100 萬 token／天 | `CEREBRAS_API_KEY` | 日額度最寬鬆 |
+| **SambaNova** | 免費層存在、免綁卡；**各模型限額差異大**（部分模型僅 20 RPD，待驗證） | `SAMBANOVA_API_KEY` | OpenAI 相容（`api.sambanova.ai`）。模型 ID 以官網 dashboard 為準 |
 | **OpenRouter** | 約 20 RPM，免費模型每日有上限 | `OPENROUTER_API_KEY` | 一把 key 通到約 30 個免費模型 |
-| **Google Gemini** | 約 10–15 RPM（Flash） | `GEMINI_API_KEY` | 端點不是標準 OpenAI 格式，要改 `url` 用相容層 |
+| **Mistral** | 約 10 億 token／月、~1 req/s（查得，待驗證） | `MISTRAL_API_KEY` | 額度最寬，但**註冊要手機簡訊驗證** |
 
-上面四家 `config.json` 裡都已經預先填好了，**你只要設對應的環境變數就會自動被用到**，不用改設定檔。
+上面每一家 `config.json` 都已經預先填好，**你只要設對應的環境變數就會自動被用到**，不用改設定檔。不想開終端機的話，雙擊 `設定整理AI.bat` 有互動選單。
 
 ### 設環境變數（Windows）
 
