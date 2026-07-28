@@ -200,15 +200,30 @@ jobs:
       - name: 靜默解除安裝並驗證清乾淨
         if: env.installed == '1'
         shell: pwsh
+        timeout-minutes: 6
         run: |
-          # ⚠️ 不要用 -Recurse 掃整個 Programs 找 unins*.exe：runner 上有其他預裝
-          #    軟體的解除安裝程式，會抓錯目標、彈互動視窗、掛到 job timeout
-          #    （2026-07-29 Run #5 實際發生，懸掛 35 分鐘）。用確定路徑。
+          # ⚠️ 兩個都踩過（2026-07-29）：
+          #    1. 不要 -Recurse 掃 Programs 找 unins*.exe——會抓到別家軟體（Run #5 懸掛）
+          #    2. 不要 -Wait 乾等——解除安裝器懸掛時你只會拿到 timeout，什麼證據都沒有
+          #       （Run #7 懸掛 13m46s）。改成輪詢＋逾時吐證據：log、程序清單全印出來。
           $appdir = Join-Path $env:LOCALAPPDATA "Programs\local-dictate"
           $unins = Join-Path $appdir "unins000.exe"
           if (!(Test-Path $unins)) { throw "找不到解除安裝程式：$unins" }
-          $p = Start-Process $unins -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "解除安裝失敗 exit $($p.ExitCode)" }
-          Start-Sleep -Seconds 8      # Inno 解除安裝器會自我複製後才刪檔，等它收尾
-          if (Test-Path (Join-Path $appdir "local-dictate.exe")) { throw "解除安裝後主程式還在" }
+          $ulog = Join-Path $env:TEMP "uninst.log"
+          Start-Process $unins -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$ulog"
+          $gone = $false
+          foreach ($i in 1..36) {          # 最多 3 分鐘
+            Start-Sleep -Seconds 5
+            if (!(Test-Path (Join-Path $appdir "local-dictate.exe"))) { $gone = $true; break }
+          }
+          if (!$gone) {
+            Write-Host "=== 解除安裝逾時，屍檢 ==="
+            Write-Host "--- uninstaller log ---"
+            if (Test-Path $ulog) { Get-Content $ulog } else { Write-Host "(沒有 log)" }
+            Write-Host "--- 相關程序 ---"
+            Get-Process | Where-Object { $_.ProcessName -match 'unins|_iu|local-dictate' } |
+              Format-Table Id, ProcessName, StartTime -AutoSize | Out-String | Write-Host
+            throw "解除安裝 3 分鐘內沒有完成"
+          }
           Write-Host "解除安裝乾淨"
+          if (Test-Path $ulog) { Write-Host "--- uninstaller log（成功）---"; Get-Content $ulog | Select-Object -Last 10 }
