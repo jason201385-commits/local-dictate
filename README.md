@@ -254,7 +254,17 @@ python setup_shortcuts.py --remove       # 全部移除
 
 **要完全不出網**：把 `config.json` 的 `polish.enabled` 設成 `false`，或在面板上把 `✨整理` 點成灰色。功能完全不受影響，只是不會幫你去口頭禪。
 
-「整理」層預設走 [NVIDIA NIM](https://build.nvidia.com/)（有免費額度），讀環境變數 `NVIDIA_API_KEY`。**沒設 key 就自動退回貼原文，不會壞掉**。想換成別家 OpenAI 相容 API，改 `config.json` 的 `polish.url` 和 `polish.model` 即可。
+### 「整理」要接哪一家 → 看 [docs/providers.md](docs/providers.md)
+
+整理層支援 **8 個入口**，依序往下試，哪一家能用就用哪一家：
+
+`local`（Ollama／LM Studio）→ `nvidia` → `groq` → `cerebras` → `gemini` → `sambanova` → `openrouter` → `mistral`
+
+- **最推薦本機 LLM**：沒有額度、沒有速率限制、文字也不出網，把最後一個隱私缺口補掉
+- 想用雲端的免費額度：**雙擊 `設定整理AI.bat`**，選一家、貼上 key 就好——不用編 JSON、不用開終端機。key 直接寫進 Windows 使用者環境變數，不會進任何檔案或 log
+- **一家都沒設也不會壞**：第一層本機規則清理永遠會跑，只是比較陽春
+
+每一家怎麼申請、免費額度多少、哪個模型別用，全部寫在 [docs/providers.md](docs/providers.md)。
 
 ---
 
