@@ -201,11 +201,14 @@ jobs:
         if: env.installed == '1'
         shell: pwsh
         run: |
-          $unins = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter unins*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (!$unins) { throw "找不到解除安裝程式" }
-          $p = Start-Process $unins.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          # ⚠️ 不要用 -Recurse 掃整個 Programs 找 unins*.exe：runner 上有其他預裝
+          #    軟體的解除安裝程式，會抓錯目標、彈互動視窗、掛到 job timeout
+          #    （2026-07-29 Run #5 實際發生，懸掛 35 分鐘）。用確定路徑。
+          $appdir = Join-Path $env:LOCALAPPDATA "Programs\local-dictate"
+          $unins = Join-Path $appdir "unins000.exe"
+          if (!(Test-Path $unins)) { throw "找不到解除安裝程式：$unins" }
+          $p = Start-Process $unins -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "解除安裝失敗 exit $($p.ExitCode)" }
-          Start-Sleep -Seconds 5
-          $appdir = Split-Path $unins.FullName
+          Start-Sleep -Seconds 8      # Inno 解除安裝器會自我複製後才刪檔，等它收尾
           if (Test-Path (Join-Path $appdir "local-dictate.exe")) { throw "解除安裝後主程式還在" }
           Write-Host "解除安裝乾淨"
