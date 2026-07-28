@@ -123,8 +123,15 @@ DEFAULT_CFG = {
         # 想完全不出網：把 local 那筆留著、其餘刪掉（或 enabled 設 false）。
         # 各家免費額度與設定方式見 docs/providers.md。
         "providers": [
+            # timeout 15：Ollama 冷啟動要把模型載進記憶體，3 秒必逾時
+            # （2026-07-29 實測 2.33GB 的 qwen3:4b 就中招被誤標死）。
+            # 啟動時另有背景暖機（probe_local_providers），日常呼叫不會等這麼久。
+            # ⚠️ 模型必須是「非思考型」。qwen3:4b 實測不可用：它把輸出全花在
+            # thinking（進 reasoning 欄位）、content 回空的，而且 Ollama 相容端點
+            # 對 /no_think 軟開關與 think:false 參數都無視（2026-07-29 三路實測）。
+            # qwen2.5:3b-instruct 一次就對，1.8GB 更小。
             {"name": "local", "url": "http://localhost:11434/v1/chat/completions",
-             "model": "qwen3:4b", "key_env": None},
+             "model": "qwen2.5:3b-instruct", "key_env": None, "timeout": 15},
             {"name": "nvidia", "url": "https://integrate.api.nvidia.com/v1/chat/completions",
              "model": "openai/gpt-oss-120b", "key_env": "NVIDIA_API_KEY"},
             {"name": "groq", "url": "https://api.groq.com/openai/v1/chat/completions",
@@ -954,6 +961,39 @@ def tidy_local(text):
     return out or text
 
 
+# ── Protected-token guard（SPEC-cleanup v2 §4.4 / Phase 0）───────────────
+# 小模型會竄改內容：實測 qwen2.5:3b 把「skill」翻成「技能」、「日更」改成「日記」。
+# 數字、英文 token、vocab 詞條在整理前後必須一致（含出現次數），否則丟棄 LLM 結果。
+# 基準是「進 LLM 前的文字」（已過改口剖析），所以被使用者撤回的數字不在保護範圍
+# ——這是 v1 審查抓到的互斥問題的解法。
+_PROT_RX = re.compile(r"[A-Za-z][A-Za-z0-9_.\-]*|\d[\d,.]*")
+
+
+def _prot_multiset(text):
+    from collections import Counter
+    return Counter(t.casefold() for t in _PROT_RX.findall(text))
+
+
+def guard_ok(src, out):
+    """(通過?, 原因)。嚴格多重集合相等：少了=被刪/翻譯，多了=幻覺新增，
+    形式變了（3,000→3000）也算——正規化是確定性層的事，不給 LLM 做。"""
+    a, b = _prot_multiset(src), _prot_multiset(out)
+    if a != b:
+        miss = list((a - b).keys())[:3]
+        extra = list((b - a).keys())[:3]
+        why = []
+        if miss:
+            why.append("遺失/被改:" + ",".join(miss))
+        if extra:
+            why.append("新增:" + ",".join(extra))
+        return False, "；".join(why)
+    # vocab 詞條（中文專名）：原文有的，整理後必須還在
+    for t in TERMS:
+        if t and t in src and t not in out:
+            return False, f"vocab 詞條遺失:{t}"
+    return True, ""
+
+
 # ── 第二層：LLM 整理（可選，唯一會出網的路徑，只送文字）──────────────────
 POLISH_SYS = (
     "你是逐字稿整理器，不是助理。\n"
@@ -991,10 +1031,27 @@ def probe_local_providers():
         try:
             s.connect((u.hostname, u.port or 80))
             log(f"本機 LLM 就緒：{pr.get('name')} @ {u.port}（整理不會出網）")
+            # 背景暖機：本機伺服器活著 ≠ 模型已載入。Ollama 第一次請求才載模型，
+            # 2.33GB 要好幾秒——不先暖，使用者第一次整理就逾時被誤標死。
+            threading.Thread(target=_warm_local, args=(pr,), daemon=True,
+                             name="llm-warmup").start()
         except Exception:
             _DEAD_PROVIDERS.add(pr.get("name"))
         finally:
             s.close()
+
+
+def _warm_local(pr):
+    import requests
+    try:
+        t0 = time.time()
+        requests.post(pr["url"],
+                      json={"model": pr["model"], "max_tokens": 1,
+                            "messages": [{"role": "user", "content": "ping"}]},
+                      timeout=180)
+        log(f"本機模型 {pr['model']} 暖機完成（{time.time()-t0:.0f}s）")
+    except Exception as e:
+        log(f"（本機模型暖機失敗：{str(e)[:60]}）")
 
 
 def _candidates():
@@ -1008,13 +1065,14 @@ def _candidates():
         key = os.environ.get(env) if env else None
         if env and not key:
             continue                      # 沒設 key 就別浪費一次連線
-        out.append((pr.get("name", "?"), pr["url"], pr["model"], key))
+        out.append((pr.get("name", "?"), pr["url"], pr["model"], key,
+                    pr.get("timeout"), bool(pr.get("no_think"))))
     if not out and p.get("url"):          # 舊格式相容
         key = os.environ.get("NVIDIA_API_KEY")
         if key:
             for m in [p.get("model")] + list(p.get("fallbacks") or []):
                 if m:
-                    out.append(("nvidia", p["url"], m, key))
+                    out.append(("nvidia", p["url"], m, key, None, False))
     return out
 
 
@@ -1044,7 +1102,7 @@ def polish(text, app=None):
         log("（沒有可用的 LLM provider → 只用本機清理。設定方式見 docs/providers.md）")
         return text
     hard_deadline = time.monotonic() + float(p.get("total_deadline", 12))
-    for i, (name, url, model, key) in enumerate(cands):
+    for i, (name, url, model, key, tmo, no_think) in enumerate(cands):
         if time.monotonic() >= hard_deadline:
             log("⚠ 整理總時限已到 → 改用本機清理結果")
             break
@@ -1054,18 +1112,27 @@ def polish(text, app=None):
                               headers={"Authorization": f"Bearer {key}"} if key else {},
                               json={"model": model, "temperature": 0.2,
                                     "max_tokens": min(4000, len(text) * 3 + 200),
-                                    "messages": [{"role": "system", "content": sys_msg},
+                                    "messages": [{"role": "system",
+                                                  "content": sys_msg + ("\n/no_think" if no_think else "")},
                                                  {"role": "user", "content": user_msg}]},
-                              timeout=min(3 if local else p.get("timeout", 30),
+                              timeout=min(tmo or (3 if local else p.get("timeout", 30)),
                                           max(1.0, hard_deadline - time.monotonic())))
             r.raise_for_status()
             out = r.json()["choices"][0]["message"]["content"].strip()
+            # thinking 模型可能把 <think>…</think> 混進 content——剝掉只留答案
+            out = re.sub(r"<think>.*?</think>", "", out, flags=re.S).strip()
             if not out:
+                log(f"（{name}/{model} 回了空內容 → 換下一家）")
                 continue
             if len(out) > limit:
                 log(f"⚠ {name}/{model} 整理結果異常膨脹（{len(text)}→{len(out)} 字，"
                     f"上限 {limit}）→ 丟棄，改用原文")
                 return text
+            ok_g, why = guard_ok(text, out)
+            if not ok_g:
+                # 換下一家而不是直接放棄：大模型通常不會犯小模型的竄改
+                log(f"⚠ {name}/{model} 改動了受保護內容（{why}）→ 換下一家")
+                continue
             if i:
                 log(f"（整理改用備援 {name}/{model}）")
             return out

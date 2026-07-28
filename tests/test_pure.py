@@ -110,6 +110,17 @@ check("Claude Code",
       "Claude Code")
 check("未知的走 fallback", D._app_label(r"C:\x\weird.exe", "weird"), "weird")
 
+print("\n[Protected-token guard] 小模型竄改要被擋（實測案例）")
+check_true("英文被翻譯 → 擋", not D.guard_ok("我要做一個 skill", "我要做一個技能")[0])
+check_true("數字形式改變 → 擋", not D.guard_ok("維護費 3000", "維護費 3,000")[0])
+check_true("幻覺新增數字 → 擋", not D.guard_ok("約三點見", "約 3 點 15 分見")[0])
+check_true("數字被刪 → 擋", not D.guard_ok("A 3000 B 5000", "A 3000 B")[0])
+check_true("只加標點 → 過", D.guard_ok("維護費 3000", "維護費 3000。")[0])
+check_true("大小寫差異 → 過（canonicalize 的事）",
+           D.guard_ok("用 iphone 傳", "用 iPhone 傳")[0])
+check_true("去口頭禪不動 token → 過",
+           D.guard_ok("嗯 skill 做好了 3000 元", "skill 做好了，3000 元。")[0])
+
 print("\n[背景模型升級] 硬體推薦與升級判斷")
 check("GPU → medium", D._hw_recommend(gpu_ok=True, cores=4), ("medium", 5))
 check("CPU 8 核 → small", D._hw_recommend(gpu_ok=False, cores=8), ("small", 5))

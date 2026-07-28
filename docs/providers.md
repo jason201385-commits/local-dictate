@@ -23,11 +23,16 @@ whisper 的 `medium` 模型大約佔 1GB VRAM，所以 6GB 的卡還有約 5GB �
 ### Ollama（最簡單）
 
 1. 裝 [Ollama](https://ollama.com/)
-2. 拉一個小模型（整理逐字稿不需要大模型，4B 等級就夠）：
+2. 拉一個小模型（整理逐字稿不需要大模型，3B 等級就夠）：
    ```bash
-   ollama pull qwen3:4b
+   ollama pull qwen2.5:3b-instruct
    ```
 3. 完成。`config.json` 的預設 provider 清單第一筆就是它，會自動被用到。
+
+> ⚠️ **不要用 qwen3 系列當整理模型**（2026-07-29 實測）：Qwen3 是思考型模型，
+> 在 Ollama 的 OpenAI 相容端點下，輸出全部進 `reasoning` 欄位、`content` 回空的，
+> 而且 `/no_think` 軟開關與 `think:false` 參數都會被無視——整理會**靜默失效**
+> 然後退到雲端（如果有 key）或原文。要用思考型模型得走 Ollama 原生 API，本專案不做。
 
 沒裝也不會有事——連不上會被記起來，那次啟動不再重試，直接往下一家走。
 

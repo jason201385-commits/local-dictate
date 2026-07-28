@@ -79,12 +79,14 @@ def pick_local():
     import shutil
     if shutil.which("ollama"):
         print("  ✅ 偵測到已安裝 Ollama。接下來在終端機執行一次：\n")
-        print("       ollama pull qwen3:4b\n")
+        print("       ollama pull qwen2.5:3b-instruct\n")
         print("  拉完就好，口述引擎會自動接上（重開一次引擎）。")
+        print("  ⚠️ 不要用 qwen3 系列：它是思考型模型，在 Ollama 相容端點下")
+        print("     輸出會全花在思考、正文回空的（實測），整理會靜默失效。")
     else:
         print("  ❌ 還沒安裝。三步：")
         print("     1. 到 https://ollama.com/ 下載安裝")
-        print("     2. 開終端機執行： ollama pull qwen3:4b")
+        print("     2. 開終端機執行： ollama pull qwen2.5:3b-instruct")
         print("     3. 重開口述引擎，它會自動偵測到")
     print("\n  設定檔不用改——providers 清單第一筆就是本機。")
 
