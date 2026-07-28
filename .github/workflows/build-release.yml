@@ -149,6 +149,7 @@ jobs:
   verify-install:
     needs: build
     runs-on: windows-latest
+    timeout-minutes: 15        # 任何一步卡住不准拖滿 6 小時（2026-07-29 實際發生 35 分鐘懸掛）
     steps:
       - uses: actions/download-artifact@v4
         with:
