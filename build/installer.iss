@@ -104,6 +104,12 @@ var
 begin
   if CurUninstallStep = usPostUninstall then
   begin
+    // ⚠️ 靜默解除安裝時「不要問、直接保留資料」。
+    //    以前這裡無條件 MsgBox——理論上 /SUPPRESSMSGBOXES 會自動選預設，
+    //    但在 CI runner 上實測會懸掛 13 分鐘直到 timeout（2026-07-29 Run #7）。
+    //    對話框只留給互動式解除安裝。
+    if UninstallSilent then
+      Exit;
     DataDir := ExpandConstant('{localappdata}\local-dictate');
     if DirExists(DataDir) then
     begin
