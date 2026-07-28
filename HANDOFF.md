@@ -1,4 +1,21 @@
-# 交接筆記 — 2026-07-26（末次更新 2026-07-29）
+# 交接筆記 — 2026-07-26（末次更新 2026-07-29 深夜）
+
+> **7/29 深夜增量（本機 LLM ＋ CI 驗證閉環戰役）**：
+> - **本機整理實戰化**：Jason 機器 Ollama 已跑、模型已 pull。連環修三雷——
+>   ①冷啟動 3s 逾時誤標死→timeout 15s＋啟動背景暖機
+>   ②qwen3 思考型模型在 Ollama 相容端點 content 恆空（/no_think、think:false 都無效，三路實測）
+>   →**本機預設改 qwen2.5:3b-instruct**，qwen3 警告寫進 docs/providers.md
+>   ③3B 模型會竄改內容（skill→技能、日更→日記）→ **protected-token guard 上線**
+>   （數字/英文/vocab 多重集合相等，違規換下一家；基準=改口剖析後文字）
+> - **背景模型升級**：出廠 base 起步，背景抓硬體值得的模型後在 worker 空檔熱切換
+> - **CI 乾淨機驗證的兩段懸掛**：
+>   Run #5＝`-Recurse` 掃到別家 uninstaller（35min）；
+>   Run #7＝解除安裝器本身掛（13m46s），最可疑=[Code] MsgBox 在 runner 不被 SUPPRESSMSGBOXES 抑制
+>   → installer.iss 改 UninstallSilent 直接保留資料不問；workflow 改輪詢＋逾時吐屍檢
+> - **五項核心斷言已在乾淨 runner 連過兩輪**（#5、#7），只差解除安裝段閉環
+> - Run #8（含全部修正）結果：＿＿＿＿ ← 交接時填
+> - ⚠️ 操作教訓：GitHub 未認證 API 60 次/小時，monitor 會被限流悶死→改爬 HTML；
+>   瀏覽器按 Cancel 前先確認在哪個 run 的頁面（#6 被誤殺）
 
 > **7/28-29 增量**（詳見各 commit 與 SPEC）：
 > - 整理層 SPEC v2（`docs/SPEC-cleanup.md`）——v1 被外部對抗審查打 4/10 後全面改版，審查紀錄在 §9
