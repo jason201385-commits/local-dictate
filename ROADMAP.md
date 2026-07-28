@@ -86,6 +86,10 @@ Tk/Tcl 資料目錄、OpenCC 字典資料、CA certificate bundle。**關閉 UPX
 
 ## P2 · 整理層（零成本趨近 Typeless）
 
+> 📐 完整設計與驗收規格：**[docs/SPEC-cleanup.md](docs/SPEC-cleanup.md)**（2026-07-28）。
+> 核心診斷：LLM 整理層對下載 exe 的人**目前不存在**（要嘛要 ollama 要嘛要 API key），
+> 解法＝內嵌 llama-server sidecar ＋ 程式端三道防線 ＋ 品質閘。以 SPEC 為準，本節只是索引。
+
 - [x] 第一層本機規則：語助詞、重複字、標點正規化（零設定、0 延遲、不出網）
 - [x] 「第一…第二…」自動分行（**只插換行、不改字**）
 - [x] 依目標 app 換整理風格
