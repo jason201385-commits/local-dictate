@@ -4,6 +4,13 @@
 
 ---
 
+## Unreleased — 授權合規補件
+- 新增 `THIRD_PARTY_NOTICES.md`＋`licenses/`（18 個打包元件的授權清單與原文）與 `LGPL-COMPLIANCE.md`（pynput/FFmpeg 的 LGPL 替換說明）。**為什麼**：安裝檔一直有打包 MIT/BSD/Apache/LGPL 元件，但 release 沒附它們的授權文——MIT/BSD 要求散布時保留聲明，LGPL 要求提供替換途徑，之前都缺。
+- `installer.iss` 把上述檔案裝進 `{app}`；README 補第三方授權段落與「與比較產品無關聯」聲明。
+- 程式行為零改動。
+
+---
+
 ## v0.1.2 — 2026-07-26
 
 **如果你已經裝了 v0.1.1，這版只有檔名與版本號的差別，功能完全相同，可以不用更新。**

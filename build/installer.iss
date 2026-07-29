@@ -77,6 +77,11 @@ Name: "autostart"; Description: "{cm:AutoStart}"; Flags: unchecked
 
 [Files]
 Source: "..\dist\local-dictate\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 第三方授權聲明與原文——LGPL/MIT/BSD/Apache 條款要求隨散布提供
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LGPL-COMPLIANCE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; 內建 base 模型（141MB），讓第一次啟動不用等下載。
 ; 建置時把模型放到 build\bundled-model\ 底下，沒有的話這行會被跳過。
 Source: "bundled-model\*"; DestDir: "{localappdata}\local-dictate\models"; \
