@@ -4,10 +4,13 @@
 
 ---
 
-## Unreleased — 授權合規補件
-- 新增 `THIRD_PARTY_NOTICES.md`＋`licenses/`（18 個打包元件的授權清單與原文）與 `LGPL-COMPLIANCE.md`（pynput/FFmpeg 的 LGPL 替換說明）。**為什麼**：安裝檔一直有打包 MIT/BSD/Apache/LGPL 元件，但 release 沒附它們的授權文——MIT/BSD 要求散布時保留聲明，LGPL 要求提供替換途徑，之前都缺。
-- `installer.iss` 把上述檔案裝進 `{app}`；README 補第三方授權段落與「與比較產品無關聯」聲明。
-- 程式行為零改動。
+## v0.1.3 — 2026-07-30
+
+**程式行為零改動。** 如果你已經在用 v0.1.2，功能上沒有任何差別，更新只是為了讓你手上那份的授權文件是完整的。
+
+新增 `THIRD_PARTY_NOTICES.md`＋`licenses/`（18 個打包元件的授權清單與原文）與 `LGPL-COMPLIANCE.md`（pynput／FFmpeg 的 LGPL 替換說明），`installer.iss` 把它們一併裝進程式目錄；README 補第三方授權段落與「與比較產品無關聯」聲明。
+
+**為什麼會壞**：安裝檔從第一版就打包了 MIT／BSD／Apache／**LGPL** 元件（faster-whisper、pynput、PyAV 內的 FFmpeg DLL、PortAudio…），但 release 沒附它們的授權原文。MIT／BSD 要求散布時保留著作權聲明，LGPL 還要求提供授權全文與「用你自己的版本替換」的途徑——這些跟程式跑不跑得動無關，缺了就是散布違約。順帶查清兩件事：CI 刻意不打包 nvidia-* 元件，所以沒有 NVIDIA 再散布問題；FFmpeg 是 PyAV 官方 wheel 的 LGPL 組態（不含 x264／x265），沒有 GPL 傳染。
 
 ---
 
