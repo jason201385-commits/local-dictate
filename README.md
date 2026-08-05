@@ -159,7 +159,7 @@ python tune.py --apply    # 把結論寫進 config.json
 | **Windows 麥克風權限** | 必須開啟 | **關著的話一定收不到聲音**，而且不會有明顯錯誤 |
 | 磁碟空間 | **約 3GB** | 模型下載會失敗 |
 | NVIDIA 顯卡 | 選配 | 自動退 CPU，慢 5 倍左右（見下方實測） |
-| `ffmpeg` | 選配 | 日常聽寫**不需要**；只有 `--file` 自我測試會用到 |
+| `ffmpeg` | 選配 | 日常聽寫**不需要**；只有 `--file` 自我測試會用到。**下載安裝檔／portable 版不含 FFmpeg**（PyAV 的 wheel 內含 GPL 授權的 x264／x265，而即時聽寫用不到它們——見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)），要從音檔轉錄請從原始碼執行並 `pip install av` |
 | `NVIDIA_API_KEY` | 選配 | 「✨整理」自動退回貼原文，不會壞 |
 
 ---

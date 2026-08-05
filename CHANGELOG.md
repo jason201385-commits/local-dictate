@@ -6,7 +6,28 @@
 
 ## v0.1.4 — 2026-07-30
 
-**如果你用的是 `local-dictate-portable.zip`（免安裝版），請更新。** v0.1.3 的 portable 版**沒有附上任何第三方授權文件**——安裝檔有，免安裝版沒有。
+**建議所有 v0.1.3（含）以前的使用者更新。** 這一版修掉兩個授權問題，其中一個比較嚴重。
+
+### 🔴 移除 FFmpeg：先前版本散布了 GPL 授權的 x264／x265
+
+v0.1.3（含）以前的安裝檔與 portable zip 內含 `_internal/av.libs/`，那裡面除了 FFmpeg，還有 **`libx264`（2.3MB）與 `libx265`（12.6MB）——兩者都是 GPL-2.0-or-later**。從 avcodec DLL 抽出的 FFmpeg 內嵌組態字串是：
+
+```
+--enable-version3 --enable-libx264 --enable-libx265
+```
+
+**而 v0.1.3 的 THIRD_PARTY_NOTICES.md 寫的是「PyAV 官方 wheel 之 LGPL 組態 build（不含 x264/x265 等 GPL 元件）」——那句話與事實相反。** 這比漏附授權文更糟：漏附是疏忽，錯誤宣稱會誤導拿這份程式去再散布的人。當時那句話是沒有實際檢查 DLL 就寫下的。
+
+處理方式是**直接不要散布它**：`build/local-dictate.spec` 的 `excludes` 拿掉 `av`，加一個 runtime hook（`build/rthook_no_av.py`）用 stub 頂替 faster-whisper 的 `import av`。
+
+為什麼可以這樣做：**即時聽寫從來沒用到 FFmpeg**。麥克風音訊在 `dictate.py` 是 `np.frombuffer(...).astype(np.float32)` 直接餵給模型，不走 faster-whisper 的檔案解碼路徑；av 只有 `decode_audio()` 會用到，那是「從音檔轉錄」才需要的。實測擋掉 av 之後模型載入與轉錄完全正常。
+
+- **對你的影響**：功能零損失，安裝檔小約 25MB。唯一的代價是打包版不能從音檔轉錄——要用請從原始碼執行（`pip install av`，那時 FFmpeg 是你自己裝的）。
+- CI 加了硬斷言：產物一旦出現 `x264`／`x265`／`avcodec` 等檔名就擋下 release。
+
+### portable zip 先前沒有附授權文件
+
+v0.1.3 只在 `build/installer.iss` 加了授權文件。但 portable zip 是 CI 直接壓 `dist\local-dictate\*`，**完全繞過 installer.iss**。CI 全綠、乾淨機五項斷言全過、release 正常發佈——沒有任何一個環節會發現免安裝版少了東西，因為從來沒有人驗過「授權文件真的在產物裡」。是事後把已發佈的 zip 抓下來拆開才看到的。
 
 **為什麼會壞**（這一條值得看，它是「綠燈不等於做到了」的標準案例）：
 v0.1.3 只在 `build/installer.iss` 加了授權文件。但 portable zip 是 CI 直接壓 `dist\local-dictate\*`，**完全繞過 installer.iss**。CI 全綠、乾淨機五項斷言全過、release 正常發佈——沒有任何一個環節會發現免安裝版少了東西，因為從來沒有人驗過「授權文件真的在產物裡」。是事後把已發佈的 zip 抓下來拆開才看到的。
@@ -27,7 +48,13 @@ v0.1.3 只在 `build/installer.iss` 加了授權文件。但 portable zip 是 CI
 
 新增 `THIRD_PARTY_NOTICES.md`＋`licenses/`（18 個打包元件的授權清單與原文）與 `LGPL-COMPLIANCE.md`（pynput／FFmpeg 的 LGPL 替換說明），`installer.iss` 把它們一併裝進程式目錄；README 補第三方授權段落與「與比較產品無關聯」聲明。
 
-**為什麼會壞**：安裝檔從第一版就打包了 MIT／BSD／Apache／**LGPL** 元件（faster-whisper、pynput、PyAV 內的 FFmpeg DLL、PortAudio…），但 release 沒附它們的授權原文。MIT／BSD 要求散布時保留著作權聲明，LGPL 還要求提供授權全文與「用你自己的版本替換」的途徑——這些跟程式跑不跑得動無關，缺了就是散布違約。順帶查清兩件事：CI 刻意不打包 nvidia-* 元件，所以沒有 NVIDIA 再散布問題；FFmpeg 是 PyAV 官方 wheel 的 LGPL 組態（不含 x264／x265），沒有 GPL 傳染。
+**為什麼會壞**：安裝檔從第一版就打包了 MIT／BSD／Apache／**LGPL** 元件（faster-whisper、pynput、PyAV 內的 FFmpeg DLL、PortAudio…），但 release 沒附它們的授權原文。MIT／BSD 要求散布時保留著作權聲明，LGPL 還要求提供授權全文與「用你自己的版本替換」的途徑——這些跟程式跑不跑得動無關，缺了就是散布違約。
+
+> ⚠️ **這一版的說明有兩處是錯的，v0.1.4 已更正**：
+> 1. 「FFmpeg 是 PyAV 官方 wheel 的 LGPL 組態（不含 x264／x265），沒有 GPL 傳染」——**相反**。那份 wheel 內含 GPL-2.0+ 的 libx264／libx265，組態是 `--enable-version3 --enable-libx264 --enable-libx265`。這句話當時沒有實際檢查 DLL 就寫下了。
+> 2. 這一版只有安裝檔附上授權文件，**portable zip 沒有**。
+>
+> 兩件事都在 v0.1.4 修掉。這一版的 release 資產不建議再使用。
 
 ---
 

@@ -29,8 +29,11 @@ binaries = []
 binaries += collect_dynamic_libs("ctranslate2")
 datas += collect_data_files("ctranslate2")
 
-# av / FFmpeg：faster-whisper 用它解音訊
-binaries += collect_dynamic_libs("av")
+# av / FFmpeg：**刻意不打包**。PyAV 的 Windows wheel 內含 libx264/libx265（GPL-2.0+），
+# 而即時聽寫用不到它們（音訊是 numpy array 直接進模型，不走檔案解碼）。
+# 詳細理由與證據見 build/rthook_no_av.py。
+# 原本這裡是 `binaries += collect_dynamic_libs("av")` —— 那會把 25MB 的 GPL 編碼器
+# 一起散布，並讓「本專案 MIT，拿去賣都可以」這句話對二進位版變成錯的。
 
 # sounddevice 的 PortAudio DLL 放在獨立的 _sounddevice_data 套件裡
 datas += collect_data_files("_sounddevice_data")
@@ -90,10 +93,13 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    runtime_hooks=[],
+    # 啟動時把 av 換成 stub，讓 faster_whisper 的 `import av` 不會炸
+    runtime_hooks=[os.path.join(ROOT, "build", "rthook_no_av.py")],
     # 明確排除用不到的大套件，不要讓它們被 pull 進來
+    # "av" 是授權考量（GPL 的 x264/x265），不是體積考量 —— 見 build/rthook_no_av.py
     excludes=["matplotlib", "scipy", "pandas", "PIL", "PyQt5", "PySide6",
-              "IPython", "notebook", "pytest", "torch", "torchvision"],
+              "IPython", "notebook", "pytest", "torch", "torchvision",
+              "av"],
     noarchive=False,
 )
 

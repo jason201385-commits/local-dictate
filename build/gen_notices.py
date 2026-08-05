@@ -40,16 +40,31 @@ BUILD_ONLY = {
     "pywin32-ctypes", "setuptools", "wheel", "pip", "packaging",
 }
 
-# 這幾份是人工從 gnu.org 取得的規範文本,不屬於任何 wheel,清理孤兒時要留著。
-# LGPL-3.0 是 GPL-3.0 的補充條款,依 LGPL-3.0 要求必須一併提供 GPL-3.0 全文。
-KEEP_ALWAYS = ("LGPL-2.1.txt", "LGPL-3.0.txt", "GPL-3.0.txt")
+# 這些不屬於任何 wheel(規範文本、原生函式庫、模型、runtime),由 build/fetch_extra_licenses.py
+# 取得並提交進版控,清理孤兒時必須留著。
+KEEP_ALWAYS = (
+    # GNU 規範文本(LGPL-3.0 是 GPL-3.0 的補充條款,依其要求須一併提供 GPL-3.0 全文)
+    "LGPL-2.1.txt", "LGPL-3.0.txt", "GPL-3.0.txt",
+    # 原生函式庫與 runtime(不是 pip 套件,拿不到 dist-info)
+    "portaudio-LICENSE.txt", "openssl-LICENSE.txt",
+    "cpython-LICENSE.txt", "pyinstaller-COPYING.txt",
+    # wheel 沒附授權檔的套件,改從上游取得
+    "ctranslate2-LICENSE.txt", "tokenizers-LICENSE.txt", "flatbuffers-LICENSE.txt",
+    # 模型與資料
+    "whisper-LICENSE.txt", "silero-vad-LICENSE.txt",
+)
 
-# 這幾個上游 wheel 沒有把授權檔放進 dist-info,只能給連結。
-UPSTREAM_LICENSE_URL = {
-    "ctranslate2": "https://github.com/OpenNMT/CTranslate2/blob/master/LICENSE",
-    "tokenizers": "https://github.com/huggingface/tokenizers/blob/main/LICENSE",
-    "tqdm": "https://github.com/tqdm/tqdm/blob/master/LICENCE",
-    "click": "https://github.com/pallets/click/blob/main/LICENSE.txt",
+# spec 明確排除、不會進到產物的套件 —— 列進清單會誤導使用者以為有散布。
+# av(PyAV):wheel 內含 GPL-2.0+ 的 libx264/libx265,而即時聽寫用不到,
+#           所以 build/local-dictate.spec 的 excludes 把它整個拿掉(見 rthook_no_av.py)。
+NOT_BUNDLED = {"av"}
+
+# 上游 wheel 沒把授權檔放進 dist-info 的,改用 build/fetch_extra_licenses.py
+# 抓下來、提交進版控的本地原文。MIT/BSD/Apache 要的是條文本身,不是一個連結。
+MANUAL_LICENSE_FILE = {
+    "ctranslate2": "ctranslate2-LICENSE.txt",
+    "tokenizers": "tokenizers-LICENSE.txt",
+    "flatbuffers": "flatbuffers-LICENSE.txt",
 }
 
 
@@ -76,7 +91,9 @@ def harvest(dist: md.Distribution) -> str | None:
     """把 wheel dist-info 裡的授權檔複製到 licenses/,回傳檔名。"""
     for f in dist.files or []:
         base = os.path.basename(str(f)).lower()
-        if not base.startswith(("license", "copying", "notice")):
+        # "licence" 是英式拼法,tqdm 就是用這個 —— 只比對 "license" 會漏掉,
+        # 然後在清單上被誤標成「wheel 未附檔」(2026-07-30 審查抓到)。
+        if not base.startswith(("license", "licence", "copying", "notice")):
             continue
         src = dist.locate_file(f)
         if not os.path.isfile(src):
@@ -149,7 +166,7 @@ def collect() -> list[dict]:
         if norm(name) in seen_names or norm(name) in {norm(b) for b in BUILD_ONLY}:
             continue
         seen_names.add(norm(name))
-        if norm(name).startswith("nvidia-"):
+        if norm(name).startswith("nvidia-") or norm(name) in {norm(x) for x in NOT_BUNDLED}:
             continue
         try:
             dist = md.distribution(name)
@@ -190,9 +207,11 @@ def render(rows: list[dict]) -> str:
         if r["file"]:
             ref = f"`licenses/{r['file']}`"
         else:
-            url = UPSTREAM_LICENSE_URL.get(norm(r["name"]).replace("-", ""))
-            url = url or UPSTREAM_LICENSE_URL.get(norm(r["name"]))
-            ref = f"[上游 LICENSE]({url})(wheel 未附檔)" if url else "wheel 未附檔,見上游 repo"
+            manual = MANUAL_LICENSE_FILE.get(norm(r["name"]))
+            if manual and os.path.isfile(os.path.join(LICENSES_DIR, manual)):
+                ref = f"`licenses/{manual}`(wheel 未附,取自上游)"
+            else:
+                ref = "⚠️ 缺授權原文 —— 跑 build/fetch_extra_licenses.py"
         lines += [f"| {r['name']} | {r['version']} | {r['license']} | {ref} |"]
     lines += ["", END]
     return "\n".join(lines)

@@ -81,6 +81,26 @@ jobs:
           }
           Write-Host "授權文件斷言全過：3 份頂層文件 + $($lic.Count) 份授權原文"
 
+      # ⚠️ 這一步守的是**授權相容性**，不是體積。
+      #    PyAV 的 Windows wheel 內含 libx264 / libx265，兩者都是 GPL-2.0-or-later
+      #    （從 avcodec DLL 抽出的 FFmpeg 組態字串：--enable-version3 --enable-libx264 --enable-libx265）。
+      #    把它們跟本程式放進同一個安裝檔散布，整包就要依 GPL 條款走並提供對應原始碼，
+      #    「本專案 MIT，拿去賣都可以」那句話會對二進位版變成錯的。
+      #    v0.1.3 曾經散布過它們，而且文件寫著「不含 x264/x265」—— 說法與事實相反。
+      #    即時聽寫用不到 FFmpeg（音訊是 numpy array 直接進模型），所以直接不打包。
+      #    只要有人把 av 加回相依、或哪天 hook 失效，這一步就會擋下 release。
+      - name: 斷言產物不含 GPL 編碼器（x264 / x265 / FFmpeg）
+        shell: pwsh
+        run: |
+          $bad = Get-ChildItem dist\local-dictate -Recurse -File |
+                 Where-Object { $_.Name -match '(?i)(x264|x265|avcodec|avformat|avfilter|avdevice|swscale|swresample|dav1d|SvtAv1)' }
+          if ($bad) {
+            Write-Host "=== 不該出現的檔案 ==="
+            $bad | ForEach-Object { Write-Host "  $($_.FullName)  $([math]::Round($_.Length/1MB,1)) MB" }
+            throw "產物含 GPL/FFmpeg 二進位共 $($bad.Count) 個 —— 見 build/rthook_no_av.py"
+          }
+          Write-Host "產物不含任何 FFmpeg / x264 / x265 二進位 ✅"
+
       - name: 確認產物存在且能顯示版本
         shell: pwsh
         run: |
@@ -145,33 +165,17 @@ jobs:
           New-Item -ItemType Directory -Force artifacts | Out-Null
           Compress-Archive -Path dist\local-dictate\* -DestinationPath artifacts\local-dictate-portable.zip -Force
           Get-ChildItem dist\*.exe -ErrorAction SilentlyContinue | Copy-Item -Destination artifacts
-          Get-ChildItem artifacts | ForEach-Object {
-            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
-            "$h  $($_.Name)" | Out-File artifacts\SHA256SUMS.txt -Append -Encoding utf8
-          }
+          # ⚠️ 先把清單抓完再寫檔。舊寫法是邊 Get-ChildItem 邊 -Append 寫進同一個目錄，
+          #    SHA256SUMS.txt 會在列舉途中被建立而**把自己也算進去**，而且重跑會累加。
+          $files = Get-ChildItem artifacts -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' }
+          $lines = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)" }
+          $lines | Set-Content artifacts\SHA256SUMS.txt -Encoding utf8
           Get-Content artifacts\SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: local-dictate-windows
           path: artifacts/
-
-      - name: 發佈 release（只在打 tag 時）
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          body: |
-            ### 安裝
-            下載 `local-dictate-setup-*.exe`，雙擊安裝。**不需要 Python。**
-
-            免安裝版：`local-dictate-portable.zip`，解壓後執行 `local-dictate.exe`。
-
-            ### 注意
-            - 這一版**不含 GPU 加速**（CUDA 元件約 1.9GB，另外提供）
-            - 出廠內建 base 模型；啟動後會**背景下載更適合你硬體的模型並自動切換**
-            - Windows 可能顯示「不明發行者」——原因與程式要做的事寫在 README
-            - 校驗碼見 `SHA256SUMS.txt`
 
   # ── 乾淨機驗證 ────────────────────────────────────────────────────────
   # 開發機有一堆「剛好裝過」的東西，本機測過 ≠ 裝得起來。
