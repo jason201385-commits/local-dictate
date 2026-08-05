@@ -76,12 +76,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "autostart"; Description: "{cm:AutoStart}"; Flags: unchecked
 
 [Files]
+; 第三方授權聲明（THIRD_PARTY_NOTICES.md / LGPL-COMPLIANCE.md / LICENSE / licenses\）
+; **已經在 dist\local-dictate\ 裡面**，由 build/local-dictate.spec 收進 PyInstaller 產物，
+; 所以下面這一行就涵蓋了，不要在這裡再列一次。
+; 為什麼放 spec 不放這裡（v0.1.3 的教訓）：portable zip 是 CI 直接壓 dist\，
+; 完全繞過本檔——當時只在這裡加，結果安裝檔有授權文、免安裝版沒有。
 Source: "..\dist\local-dictate\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; 第三方授權聲明與原文——LGPL/MIT/BSD/Apache 條款要求隨散布提供
-Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\LGPL-COMPLIANCE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; 內建 base 模型（141MB），讓第一次啟動不用等下載。
 ; 建置時把模型放到 build\bundled-model\ 底下，沒有的話這行會被跳過。
 Source: "bundled-model\*"; DestDir: "{localappdata}\local-dictate\models"; \

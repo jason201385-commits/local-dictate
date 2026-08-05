@@ -44,9 +44,42 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python tests/test_pure.py
 
+      # 一定要在打包**之前**跑：spec 會把 licenses/ 與 THIRD_PARTY_NOTICES.md 收進產物，
+      # 所以清單必須先反映「這一次 build 實際裝了什麼版本」。
+      # 手工維護出過兩種錯（v0.1.3）：漏掉相依進來的 click、版本號寫成開發機的。
+      - name: 產生第三方元件清單（從實際安裝環境）
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          python build/gen_notices.py --write
+          if ($LASTEXITCODE -ne 0) { throw "gen_notices 失敗，exit $LASTEXITCODE" }
+          $n = (Get-ChildItem licenses -File | Measure-Object).Count
+          Write-Host "licenses/ 共 $n 份授權原文"
+          if ($n -lt 20) { throw "授權原文只有 $n 份，明顯不對（預期 30+）" }
+
       - name: PyInstaller 打包
         shell: pwsh
         run: python -m PyInstaller build/local-dictate.spec --noconfirm
+
+      # ⚠️ 這一步是 v0.1.3 的教訓：那一版 CI 全綠、release 也出了，
+      #    但 portable.zip 裡**沒有任何授權檔**——因為 zip 是直接壓 dist\，
+      #    而授權檔當時只透過 installer.iss 進安裝檔。綠燈完全沒有察覺。
+      #    「宣稱有附授權文」必須被驗證，不能只寫在 README 裡。
+      - name: 斷言授權文件真的在產物裡
+        shell: pwsh
+        run: |
+          $d = "dist\local-dictate"
+          foreach ($f in "THIRD_PARTY_NOTICES.md", "LGPL-COMPLIANCE.md", "LICENSE") {
+            if (!(Test-Path (Join-Path $d $f))) { throw "產物缺少 $f —— 檢查 build/local-dictate.spec 的 datas" }
+          }
+          $lic = Get-ChildItem (Join-Path $d "licenses") -File -ErrorAction SilentlyContinue
+          if (!$lic -or $lic.Count -lt 20) { throw "產物的 licenses\ 只有 $($lic.Count) 份，預期 20 份以上" }
+          # LGPL 元件的授權全文一定要在（pynput 是 LGPL-3.0、FFmpeg 是 LGPL-2.1+）
+          foreach ($f in "LGPL-3.0.txt", "LGPL-2.1.txt", "GPL-3.0.txt") {
+            if (!(Test-Path (Join-Path $d "licenses\$f"))) { throw "缺 LGPL 必附全文：$f" }
+          }
+          Write-Host "授權文件斷言全過：3 份頂層文件 + $($lic.Count) 份授權原文"
 
       - name: 確認產物存在且能顯示版本
         shell: pwsh
@@ -194,7 +227,15 @@ jobs:
           foreach ($f in "config.json","vocab.txt") {
             if (!(Test-Path (Join-Path $env:LOCALAPPDATA "local-dictate\$f"))) { throw "缺 $f" }
           }
-          Write-Host "五項斷言全過（背景模型升級下載屬預期，不影響斷言 3）"
+          # 斷言 6：授權文件跟著安裝到使用者機器上（v0.1.3 漏掉的那一項）
+          #         前面的產物斷言只證明 dist\ 有；這裡證明**安裝之後**使用者手上也有。
+          $appdir = Split-Path $exe -Parent
+          foreach ($f in "THIRD_PARTY_NOTICES.md","LGPL-COMPLIANCE.md","LICENSE") {
+            if (!(Test-Path (Join-Path $appdir $f))) { throw "安裝後缺授權文件 $f" }
+          }
+          $ilic = Get-ChildItem (Join-Path $appdir "licenses") -File -ErrorAction SilentlyContinue
+          if (!$ilic -or $ilic.Count -lt 20) { throw "安裝後 licenses\ 只有 $($ilic.Count) 份" }
+          Write-Host "六項斷言全過（背景模型升級下載屬預期，不影響斷言 3）"
           Stop-Process -Name local-dictate -Force
 
       - name: 靜默解除安裝並驗證清乾淨

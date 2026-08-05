@@ -126,3 +126,29 @@ coll = COLLECT(
     upx_exclude=[],
     name="local-dictate",
 )
+
+# ── COLLECT 之後：把授權文件再複製一份到 exe 旁邊 ──────────────────────────
+# 為什麼需要這一段（2026-07-30 本機實跑才發現）：
+# PyInstaller 6 的 onedir 版面會把**所有** datas 塞進 _internal\，
+# 所以上面那些 datas.append((p, ".")) 的落點其實是 _internal\，不是使用者看得到的地方。
+# 授權文件埋在 _internal\ 裡雖然「有附」，但沒有人會去那裡找 ——
+# MIT/BSD 要的是「隨散布提供聲明」，讓人找得到才有意義。
+# COLLECT() 建構完成時產物已經寫到磁碟，所以這裡直接複製即可。
+_dist = globals().get("DISTPATH")
+if _dist:
+    import shutil
+
+    _out = os.path.join(_dist, "local-dictate")
+    if os.path.isdir(_out):
+        for f in ("THIRD_PARTY_NOTICES.md", "LGPL-COMPLIANCE.md", "LICENSE"):
+            p = os.path.join(ROOT, f)
+            if os.path.exists(p):
+                shutil.copy2(p, os.path.join(_out, f))
+        if os.path.isdir(_licenses):
+            _dst = os.path.join(_out, "licenses")
+            os.makedirs(_dst, exist_ok=True)
+            for name in sorted(os.listdir(_licenses)):
+                p = os.path.join(_licenses, name)
+                if os.path.isfile(p):
+                    shutil.copy2(p, os.path.join(_dst, name))
+        print("[spec] 已把授權文件複製到產物根目錄（exe 旁邊）")
