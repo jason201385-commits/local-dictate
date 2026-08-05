@@ -53,6 +53,22 @@ for f in ("vocab.example.txt", "SKILL.md"):
     if os.path.exists(p):
         datas.append((p, "."))
 
+# 授權文件 —— 必須在 PyInstaller 產物裡,不能只靠 installer.iss。
+# 為什麼(2026-07-30 實測踩到):portable zip 是 CI 直接壓 dist\local-dictate\*,
+# 完全繞過 installer.iss。v0.1.3 因此出貨了一份「安裝檔有授權文、免安裝版沒有」
+# 的東西 —— 而 portable zip 一樣是散布,MIT/BSD 要求保留聲明、LGPL 要求附全文。
+# 放這裡 = 任何從 dist\ 出發的散布形式都自動合規。
+for f in ("THIRD_PARTY_NOTICES.md", "LGPL-COMPLIANCE.md", "LICENSE"):
+    p = os.path.join(ROOT, f)
+    if os.path.exists(p):
+        datas.append((p, "."))
+_licenses = os.path.join(ROOT, "licenses")
+if os.path.isdir(_licenses):
+    for name in sorted(os.listdir(_licenses)):
+        p = os.path.join(_licenses, name)
+        if os.path.isfile(p):
+            datas.append((p, "licenses"))
+
 hiddenimports = [
     "ctranslate2",
     "faster_whisper",
