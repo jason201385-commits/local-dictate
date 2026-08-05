@@ -14,12 +14,36 @@
   · upx=False：UPX 壓縮原生 DLL 會明顯提高防毒誤判率，省下的體積不值得。
   · 不打包 CUDA：nvidia-* 套件裝完佔約 1.9GB（本機實測），而且是 proprietary
     授權，能不能重新散布要另外確認。GPU 加速留給安裝後選配。
+    ⚠️ 但「CI 過濾 nvidia-*」只擋 pip 套件，**擋不掉別的 wheel 自己夾帶** ——
+    ctranslate2 的 wheel 內建 cudnn64_9.dll，v0.1.3（含）以前它一直在產物裡，
+    跟這段文字寫的相反。所以下面另外用 _drop_proprietary() 濾，並由 CI 斷言把關。
+  · 不打包 av / FFmpeg：PyAV 的 Windows wheel 內含 libx264/libx265（GPL-2.0+），
+    而即時聽寫用不到（音訊是 numpy array 直接進模型）。見 build/rthook_no_av.py。
   · 不打包模型：模型要能跟程式獨立更新，塞進 exe 會讓每次改版都重傳 1.5GB。
+
+**通則（這份 spec 付出代價學到的）：宣稱要由產物驗證，不能由設定或訊息驗證。**
+spec 印出「已排除」不代表東西真的不見了 —— 第一次修 cuDNN 時只濾了
+collect_dynamic_libs，collect_data_files 又把同一顆 DLL 收回來，訊息照印。
+所以 .github/workflows/build-release.yml 有對應的斷言直接掃產物檔名。
 """
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 ROOT = os.path.abspath(os.path.join(os.getcwd()))
+
+
+def _say(msg):
+    """印 spec 的進度訊息，但不要因為編碼把整個 build 弄掛。
+
+    ⚠️ 2026-07-30 CI 實際踩到：GitHub runner 的 stdout 預設是 cp1252，
+    spec 裡的中文 print 直接噴 UnicodeEncodeError，PyInstaller 整個 exit 1。
+    本機是中文 Windows 所以完全沒事 —— 又一次「本機能跑 ≠ CI 能跑」。
+    CI 那邊另外設了 PYTHONIOENCODING=utf-8，這裡是第二層保險。
+    """
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode("ascii", "backslashreplace").decode("ascii"))
 
 # ── 原生資料與 DLL ──────────────────────────────────────────────────────
 datas = []
@@ -45,8 +69,8 @@ def _drop_proprietary(entries):
 _ct2_libs, _d1 = _drop_proprietary(collect_dynamic_libs("ctranslate2"))
 _ct2_datas, _d2 = _drop_proprietary(collect_data_files("ctranslate2"))
 if _d1 or _d2:
-    print(f"[spec] 已排除 NVIDIA 專有 DLL："
-          f"{sorted({os.path.basename(s) for s, _ in _d1 + _d2})}")
+    _say(f"[spec] 已排除 NVIDIA 專有 DLL："
+         f"{sorted({os.path.basename(s) for s, _ in _d1 + _d2})}")
 binaries += _ct2_libs
 datas += _ct2_datas
 
@@ -178,4 +202,4 @@ if _dist:
                 p = os.path.join(_licenses, name)
                 if os.path.isfile(p):
                     shutil.copy2(p, os.path.join(_dst, name))
-        print("[spec] 已把授權文件複製到產物根目錄（exe 旁邊）")
+        _say("[spec] 已把授權文件複製到產物根目錄（exe 旁邊）")

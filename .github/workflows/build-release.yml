@@ -60,6 +60,11 @@ jobs:
 
       - name: PyInstaller 打包
         shell: pwsh
+        env:
+          # runner 的 stdout 預設是 cp1252，spec 裡的中文 print 會噴
+          # UnicodeEncodeError 讓整個 build exit 1（2026-07-30 實際發生）。
+          # spec 內另有 _say() 做第二層保險。
+          PYTHONIOENCODING: utf-8
         run: python -m PyInstaller build/local-dictate.spec --noconfirm
 
       # ⚠️ 這一步是 v0.1.3 的教訓：那一版 CI 全綠、release 也出了，
