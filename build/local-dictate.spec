@@ -26,8 +26,29 @@ datas = []
 binaries = []
 
 # ctranslate2：faster-whisper 的推論引擎，.pyd 旁邊有一票 DLL
-binaries += collect_dynamic_libs("ctranslate2")
-datas += collect_data_files("ctranslate2")
+# ⚠️ 這個 wheel 內建 cudnn64_9.dll（NVIDIA 專有授權）。2026-07-30 合規審查抓到：
+#    本專案到處寫「不打包 CUDA、不含 nvidia-*」，但那道防線只擋 pip 的 nvidia-* 套件，
+#    擋不掉「別的 wheel 自己夾帶」——產物裡一直有它，宣稱與事實不符。
+#    而且 CPU 推論根本用不到它（cuDNN 只在 device="cuda" 時載入），
+#    GPU 加速是安裝後自行 `pip install nvidia-cudnn-cu12`，那個套件會提供自己的 cudnn。
+#    所以這裡直接濾掉，少散布一個專有二進位。
+#    ⚠️ 要濾**兩條路**：collect_dynamic_libs 抓 DLL，collect_data_files 也會把同一批 .dll
+#       當資料檔再收一次。第一次只濾了前者，spec 照樣印出「已排除」，產物裡卻還是有它
+#       ——訊息說做了、東西還在。所以下面用同一個 filter 套在兩邊，並由 CI 斷言把關。
+def _drop_proprietary(entries):
+    keep, dropped = [], []
+    for src, dst in entries:
+        (dropped if "cudnn" in os.path.basename(src).lower() else keep).append((src, dst))
+    return keep, dropped
+
+
+_ct2_libs, _d1 = _drop_proprietary(collect_dynamic_libs("ctranslate2"))
+_ct2_datas, _d2 = _drop_proprietary(collect_data_files("ctranslate2"))
+if _d1 or _d2:
+    print(f"[spec] 已排除 NVIDIA 專有 DLL："
+          f"{sorted({os.path.basename(s) for s, _ in _d1 + _d2})}")
+binaries += _ct2_libs
+datas += _ct2_datas
 
 # av / FFmpeg：**刻意不打包**。PyAV 的 Windows wheel 內含 libx264/libx265（GPL-2.0+），
 # 而即時聽寫用不到它們（音訊是 numpy array 直接進模型，不走檔案解碼）。

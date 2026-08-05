@@ -25,9 +25,29 @@ v0.1.3（含）以前的安裝檔與 portable zip 內含 `_internal/av.libs/`，
 - **對你的影響**：功能零損失，安裝檔小約 25MB。唯一的代價是打包版不能從音檔轉錄——要用請從原始碼執行（`pip install av`，那時 FFmpeg 是你自己裝的）。
 - CI 加了硬斷言：產物一旦出現 `x264`／`x265`／`avcodec` 等檔名就擋下 release。
 
+### 移除 NVIDIA cuDNN：「不打包 CUDA」以前也不是真的
+
+`build/local-dictate.spec` 與 CI 都寫著「不打包 CUDA、刻意過濾 nvidia-*」，但那道防線只擋 pip 的 `nvidia-*` 套件，**擋不掉別的 wheel 自己夾帶**——`ctranslate2` 的 wheel 內建 `cudnn64_9.dll`（NVIDIA 專有授權），從第一版起就一直在產物裡。
+
+v0.1.4 起在 spec 明確濾掉。CPU 推論用不到它（cuDNN 只在 `device="cuda"` 時載入），GPU 加速本來就是安裝後自行 `pip install nvidia-cudnn-cu12`，那個套件會提供自己的 cudnn，所以功能不受影響。
+
+同一個 wheel 帶進來的 `libiomp5md.dll`（Intel OpenMP，CPU 推論的平行化需要它）**保留但已如實揭露**，授權條款標為待查證——沒有查清楚之前不會替它掛一個看起來合理的授權名稱。
+
 ### portable zip 先前沒有附授權文件
 
 v0.1.3 只在 `build/installer.iss` 加了授權文件。但 portable zip 是 CI 直接壓 `dist\local-dictate\*`，**完全繞過 installer.iss**。CI 全綠、乾淨機五項斷言全過、release 正常發佈——沒有任何一個環節會發現免安裝版少了東西，因為從來沒有人驗過「授權文件真的在產物裡」。是事後把已發佈的 zip 抓下來拆開才看到的。
+
+### CI：release 以前發在驗證之前，等於沒有驗證
+
+`release` 原本是 `build` job 的最後一步，而 `verify-install` 是 `needs: build`——也就是**release 早就發出去了，驗證才開始跑**。乾淨機驗證失敗擋不掉任何東西，加再多斷言也只是裝飾。現在 `release` 是獨立 job（`needs: [build, verify-install]`），驗證沒過就發不出去。
+
+順帶修掉兩個「永遠會通過」的斷言與一個真 bug：
+
+- 斷言「第一次啟動零下載」比對的字串只存在於面板 UI 的顏色表，從來不會寫進 log
+- 斷言「熱鍵有註冊」在註冊 **0 組**時照樣通過（log 寫的是「已註冊 0 組」）
+- `SHA256SUMS.txt` 邊列舉目錄邊寫入同一個目錄，會把自己的雜湊也算進去，重跑還會累加
+
+並新增：portable zip 現在會被實際解開，檢查 exe 與授權文件是否齊全（它從打包那天起沒有任何一步打開過，release 卻叫人「解壓後執行」）。
 
 **為什麼會壞**（這一條值得看，它是「綠燈不等於做到了」的標準案例）：
 v0.1.3 只在 `build/installer.iss` 加了授權文件。但 portable zip 是 CI 直接壓 `dist\local-dictate\*`，**完全繞過 installer.iss**。CI 全綠、乾淨機五項斷言全過、release 正常發佈——沒有任何一個環節會發現免安裝版少了東西，因為從來沒有人驗過「授權文件真的在產物裡」。是事後把已發佈的 zip 抓下來拆開才看到的。

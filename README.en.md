@@ -178,4 +178,18 @@ macOS port: the transcription core is already cross-platform. What's missing is 
 
 ## License
 
-MIT. Take it, change it, sell it.
+This project is MIT. Take it, change it, sell it.
+
+The installer and portable zip bundle third-party components, each distributed under its own
+license. The full inventory and license texts ship with the program
+([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `licenses/`) — the notices file is in
+Traditional Chinese, but every license text itself is the original English.
+
+Two things worth knowing:
+
+- **`pynput` is LGPL-3.0.** You have the right to replace it with your own build; see
+  [LGPL-COMPLIANCE.md](LGPL-COMPLIANCE.md) for how.
+- **No FFmpeg is bundled** (v0.1.4+). PyAV's Windows wheel ships `libx264`/`libx265`, both
+  GPL-2.0-or-later, and real-time dictation never touches them — microphone audio goes into the
+  model as a numpy array, not through file decoding. Transcribing *from an audio file* therefore
+  needs a source checkout with `pip install av`.

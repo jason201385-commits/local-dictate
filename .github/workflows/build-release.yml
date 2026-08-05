@@ -101,6 +101,23 @@ jobs:
           }
           Write-Host "產物不含任何 FFmpeg / x264 / x265 二進位 ✅"
 
+      # 「不打包 CUDA」這句話在 spec、CI 註解、NOTICES 都寫了很多年，但 v0.1.3(含)以前
+      # 產物裡一直有 cudnn64_9.dll —— 因為那道防線只擋 pip 的 nvidia-* 套件，
+      # 擋不掉「ctranslate2 的 wheel 自己夾帶」。而且第一次修的時候只濾了 collect_dynamic_libs，
+      # collect_data_files 又把同一顆 DLL 收回來，spec 還是印出「已排除」。
+      # 結論：宣稱要由**產物**驗證，不能由設定或訊息驗證。
+      - name: 斷言產物不含 NVIDIA 專有二進位
+        shell: pwsh
+        run: |
+          $bad = Get-ChildItem dist\local-dictate -Recurse -File |
+                 Where-Object { $_.Name -match '(?i)(cudnn|cublas|cudart|cufft|curand|cusolver|cusparse|nvrtc)' }
+          if ($bad) {
+            Write-Host "=== 不該出現的檔案 ==="
+            $bad | ForEach-Object { Write-Host "  $($_.FullName)  $([math]::Round($_.Length/1MB,2)) MB" }
+            throw "產物含 NVIDIA 專有二進位 $($bad.Count) 個 —— 與『不打包 CUDA』的宣稱不符"
+          }
+          Write-Host "產物不含 NVIDIA 專有二進位 ✅"
+
       - name: 確認產物存在且能顯示版本
         shell: pwsh
         run: |
@@ -224,9 +241,18 @@ jobs:
           # 斷言 2：模型載入成功（內建 base → 不需要網路下載）
           if ($content -notmatch "模型就緒") { throw "模型沒有載入" }
           # 斷言 3：第一次啟動不應該在下載主模型（內建承諾）
-          if ($content -match "首次下載語音模型") { throw "違反『第一次啟動零下載』承諾" }
-          # 斷言 4：熱鍵有註冊
-          if ($content -notmatch "已註冊") { throw "熱鍵沒有註冊" }
+          # ⚠️ 舊版比對「首次下載語音模型」—— 那串只存在於面板 UI 的顏色表（dictate.py:1173），
+          #    從來不會寫進 log，所以這條斷言永遠不會觸發，是空包彈（2026-07-30 審查抓到）。
+          #    真正會寫進 log 的是「本機還沒有 <size> 模型，開始下載」。
+          if ($content -match "本機還沒有.*模型，開始下載") {
+            throw "違反『第一次啟動零下載』承諾 —— 內建模型沒有被正確安裝"
+          }
+          # 斷言 4：熱鍵有註冊，而且**不是 0 組**
+          # ⚠️ 舊版只比對「已註冊」，但 log 寫的是「已註冊 N 組」，N=0 時照樣通過。
+          if ($content -notmatch "已註冊\s*(\d+)\s*組") { throw "log 裡沒有熱鍵註冊紀錄" }
+          $regd = [int]$Matches[1]
+          if ($regd -lt 1) { throw "熱鍵註冊了 0 組 —— 使用者會拿到一個按了沒反應的版本" }
+          Write-Host "熱鍵註冊 $regd 組"
           # 斷言 5：設定與字典有落位
           foreach ($f in "config.json","vocab.txt") {
             if (!(Test-Path (Join-Path $env:LOCALAPPDATA "local-dictate\$f"))) { throw "缺 $f" }
@@ -272,3 +298,57 @@ jobs:
           }
           Write-Host "解除安裝乾淨"
           if (Test-Path $ulog) { Write-Host "--- uninstaller log（成功）---"; Get-Content $ulog | Select-Object -Last 10 }
+
+      # portable zip 從打包那天起沒有任何一步打開過，release 卻叫人「解壓後執行」。
+      # 這裡至少驗它解得開、該有的檔案都在（授權文件是 v0.1.3 真的漏掉的那一項）。
+      - name: 驗證 portable zip（解得開、內容齊全）
+        shell: pwsh
+        run: |
+          $zip = "artifacts\local-dictate-portable.zip"
+          if (!(Test-Path $zip)) { throw "找不到 $zip" }
+          $dst = "portable-check"
+          Expand-Archive -Path $zip -DestinationPath $dst -Force
+          if (!(Test-Path "$dst\local-dictate.exe")) { throw "portable zip 裡沒有 local-dictate.exe" }
+          foreach ($f in "THIRD_PARTY_NOTICES.md", "LGPL-COMPLIANCE.md", "LICENSE") {
+            if (!(Test-Path "$dst\$f")) { throw "portable zip 缺授權文件 $f（v0.1.3 就是漏在這裡）" }
+          }
+          $n = (Get-ChildItem "$dst\licenses" -File -ErrorAction SilentlyContinue | Measure-Object).Count
+          if ($n -lt 20) { throw "portable zip 的 licenses\ 只有 $n 份" }
+          Write-Host "portable zip 驗證通過：exe + 3 份頂層文件 + $n 份授權原文"
+
+  # ── 發佈 ──────────────────────────────────────────────────────────────
+  # ⚠️ release 必須是**獨立 job 且 needs verify-install**。
+  #    舊版把發佈放在 build job 的最後一步，而 verify-install 是 needs: build ——
+  #    也就是 release 早就發出去了，驗證才開始跑。驗證失敗擋不掉任何東西，
+  #    再多斷言也只是裝飾（2026-07-30 合規審查抓到的結構性問題）。
+  release:
+    needs: [build, verify-install]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-dictate-windows
+          path: artifacts
+
+      - name: 發佈 release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          body: |
+            ### 安裝
+            下載 `local-dictate-setup-*.exe`，雙擊安裝。**不需要 Python。**
+
+            免安裝版：`local-dictate-portable.zip`，解壓後執行 `local-dictate.exe`。
+
+            ### 注意
+            - 這一版**不含 GPU 加速**（CUDA 元件約 1.9GB，另外提供）
+            - **不含 FFmpeg**：PyAV 的 wheel 內含 GPL 授權的 x264／x265，而即時聽寫用不到它們。要從音檔轉錄請從原始碼執行。詳見 `THIRD_PARTY_NOTICES.md`
+            - 出廠內建 base 模型；啟動後會**背景下載更適合你硬體的模型並自動切換**
+            - Windows 可能顯示「不明發行者」——原因與程式要做的事寫在 README
+            - 校驗碼見 `SHA256SUMS.txt`
+
+            ### 授權
+            本程式 MIT。安裝包內含第三方元件，各依其原授權散布——完整清單與授權原文隨程式一起安裝
+            （`THIRD_PARTY_NOTICES.md` 與 `licenses\`），也可在 repo 內查看。
+            其中 `pynput` 為 LGPL-3.0，替換方式見 `LGPL-COMPLIANCE.md`。

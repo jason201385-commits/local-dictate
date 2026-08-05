@@ -68,7 +68,11 @@ local-dictate 本體採 MIT(見 [LICENSE](LICENSE))。安裝檔(`setup.exe`)與�
 |---|---|---|---|
 | PortAudio | `_internal/_sounddevice_data/` | MIT 式授權 | 錄音底層,隨 sounddevice wheel 提供。原文:`licenses/portaudio-LICENSE.txt`;<http://www.portaudio.com/license.html> |
 | OpenSSL 3(libcrypto / libssl) | `_internal/` | Apache-2.0 | HTTPS 用。原文:`licenses/openssl-LICENSE.txt`;<https://www.openssl.org/source/license.html> |
+| Intel OpenMP runtime(`libiomp5md.dll`) | `_internal/ctranslate2/` | Intel 提供之可再散布執行階段元件 **[授權條款待查證]** | **CPU 推論的平行化需要它**,隨 `ctranslate2` wheel 提供,不是本專案主動加入。條款細節尚未逐條確認,先如實揭露;若查明不可再散布,將改為要求使用者自行安裝 |
 | Microsoft VC++ Runtime(msvcp 等) | `_internal/` | Microsoft 允許隨應用程式再散布之執行階段元件 | — |
+
+> **關於 NVIDIA cuDNN**:`ctranslate2` 的 wheel 內建 `cudnn64_9.dll`(NVIDIA 專有授權)。v0.1.3(含)以前**它一直在產物裡**,即使本專案到處寫著「不打包 CUDA / 不含 nvidia-*」——那道防線只擋 pip 的 `nvidia-*` 套件,擋不掉別的 wheel 自己夾帶。
+> **v0.1.4 起已在 `build/local-dictate.spec` 明確濾掉**:CPU 推論用不到它(cuDNN 只在 `device="cuda"` 時載入),GPU 加速是安裝後自行 `pip install nvidia-cudnn-cu12`,那個套件會提供自己的 cudnn。
 
 ### ⚠️ FFmpeg / x264 / x265:v0.1.4 起**不再散布**
 
