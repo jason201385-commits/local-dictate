@@ -33,6 +33,16 @@ v0.1.4 起在 spec 明確濾掉。CPU 推論用不到它（cuDNN 只在 `device=
 
 同一個 wheel 帶進來的 `libiomp5md.dll`（Intel OpenMP，CPU 推論的平行化需要它）**保留但已如實揭露**，授權條款標為待查證——沒有查清楚之前不會替它掛一個看起來合理的授權名稱。
 
+### 🎯 「第一次啟動不用等下載」現在才是真的
+
+README 從 v0.1.0 就寫著「安裝檔已內建語音模型，**第一次啟動不用等下載**」。**那句話一直沒有成立過**——每個裝好的人第一次開都在背景重新下載 141MB，只是沒有人注意到。
+
+根因：CI 用 `snapshot_download(..., local_dir=...)` 抓內建模型，而 `local_dir` 會把檔案**攤平**放進目錄，不產生 HuggingFace cache 的 `models--<org>--<repo>/snapshots/<hash>/` 佈局。但 `dictate.py` 的 `available_models()` 是用 `glob("snapshots/*/*")` 判斷「模型已經在本機」，faster-whisper 的 `download_root` 也吃 cache 佈局——所以攤平的內建模型，程式根本認不出來。
+
+改用 `cache_dir=` 即可，並在 CI 加了佈局驗證（不只相信參數改了）。
+
+**這個 bug 是被本次修好的 CI 斷言抓到的**：舊的斷言比對「首次下載語音模型」，那串字只存在於面板 UI 的顏色表、從來不會寫進 log，所以它永遠通過。換成 log 裡真正會出現的字串之後，第一次跑就抓到了。
+
 ### portable zip 先前沒有附授權文件
 
 v0.1.3 只在 `build/installer.iss` 加了授權文件。但 portable zip 是 CI 直接壓 `dist\local-dictate\*`，**完全繞過 installer.iss**。CI 全綠、乾淨機五項斷言全過、release 正常發佈——沒有任何一個環節會發現免安裝版少了東西，因為從來沒有人驗過「授權文件真的在產物裡」。是事後把已發佈的 zip 抓下來拆開才看到的。

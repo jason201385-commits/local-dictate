@@ -140,12 +140,24 @@ jobs:
           # base 約 141MB。刻意不用 tiny：本機實測 base 已經會把英文品牌名
           # 聽成不相干的中文，tiny 只會更糟，第一印象就毀了。
           # 也刻意不內建 medium：1.5GB 會讓每次改版都重傳一次。
+          # ⚠️ 一定要用 cache_dir 而不是 local_dir（2026-07-30 煙霧測試抓到）。
+          #    local_dir 會把檔案**攤平**放進指定目錄，不產生 HuggingFace cache 的
+          #    models--<org>--<repo>/snapshots/<hash>/ 佈局。
+          #    而 dictate.py 的 available_models() 是用 glob("snapshots/*/*") 判斷
+          #    「模型已經在本機」，faster-whisper 的 download_root 也吃 cache 佈局 ——
+          #    所以攤平的內建模型程式根本認不出來，每次啟動照樣重下載 141MB。
+          #    「安裝檔已內建語音模型，第一次啟動不用等下載」這個承諾從 v0.1.0
+          #    起就沒有成立過，而舊的斷言 3 是空包彈所以從來沒人發現。
           python -c @"
           from huggingface_hub import snapshot_download
-          p = snapshot_download('Systran/faster-whisper-base',
-                                local_dir='build/bundled-model/models--Systran--faster-whisper-base')
+          p = snapshot_download('Systran/faster-whisper-base', cache_dir='build/bundled-model')
           print('downloaded to', p)
           "@
+          # 驗證佈局真的對 —— 不要只相信參數改了
+          $snap = Get-ChildItem build\bundled-model -Recurse -Directory |
+                  Where-Object { $_.FullName -match 'models--Systran--faster-whisper-base\\snapshots\\' }
+          if (!$snap) { throw "內建模型佈局不對：找不到 models--Systran--faster-whisper-base\snapshots\<hash>\" }
+          Write-Host "內建模型佈局正確：$($snap[0].FullName)"
           $mb = [math]::Round((Get-ChildItem build\bundled-model -Recurse -File |
                 Measure-Object Length -Sum).Sum / 1MB, 1)
           Write-Host "內建模型大小: $mb MB"
