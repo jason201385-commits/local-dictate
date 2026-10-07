@@ -411,6 +411,8 @@ git clone https://github.com/jason201385-commits/local-dictate.git "$USERPROFILE
 
 本專案 MIT。拿去改、拿去用、拿去賣都可以。
 
-安裝檔打包的第三方元件各依其原授權散布，完整清單與原文見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)（隨安裝檔一併安裝）。其中 pynput 與 FFmpeg 是 LGPL——你有權用自己的版本替換它們，做法見 [LGPL-COMPLIANCE.md](LGPL-COMPLIANCE.md)。
+安裝檔打包的第三方元件各依其原授權散布，完整清單與原文見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)（隨安裝檔一併安裝）。其中 `pynput` 為 LGPL-3.0，你有權用自己修改或建置的版本替換它，做法見 [LGPL-COMPLIANCE.md](LGPL-COMPLIANCE.md)。
+
+**v0.1.4 起，安裝檔與免安裝版（portable）都不打包 FFmpeg**。
 
 如果它幫你省下打字的時間，歡迎回報你踩到的坑——這份 README 的「踩過的坑」就是這樣長出來的。
